@@ -1,0 +1,371 @@
+version: "3.9"
+
+services:
+
+  # ══════════════════════════════════════════════════════════════
+  #  DATABASES
+  # ══════════════════════════════════════════════════════════════
+
+  postgres:
+    image: timescale/timescaledb-ha:pg16-latest
+    container_name: aeaop-postgres
+    environment:
+      POSTGRES_DB: aeaop
+      POSTGRES_USER: aeaop
+      POSTGRES_PASSWORD: aeaop_secret
+      POSTGRES_MULTIPLE_DATABASES: aeaop,keycloak
+    volumes:
+      - postgres_data:/home/postgres/pgdata/data
+      - ./scripts/setup/init_db.sql:/docker-entrypoint-initdb.d/01_init.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "aeaop"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: aeaop-redis
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  elasticsearch:
+    image: elasticsearch:8.13.0
+    container_name: aeaop-elasticsearch
+    environment:
+      discovery.type: single-node
+      ES_JAVA_OPTS: "-Xms2g -Xmx2g"
+      xpack.security.enabled: "false"
+      cluster.name: aeaop-cluster
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -v red"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+
+  kibana:
+    image: kibana:8.13.0
+    container_name: aeaop-kibana
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: aeaop-qdrant
+    volumes:
+      - qdrant_data:/qdrant/storage
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:6333/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ══════════════════════════════════════════════════════════════
+  #  MESSAGE BUS
+  # ══════════════════════════════════════════════════════════════
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: aeaop-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zk_data:/var/lib/zookeeper/data
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: aeaop-kafka
+    depends_on: [zookeeper]
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_LOG_RETENTION_HOURS: 168
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    ports:
+      - "29092:29092"
+    healthcheck:
+      test: kafka-topics --bootstrap-server localhost:9092 --list
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ══════════════════════════════════════════════════════════════
+  #  OBJECT STORAGE
+  # ══════════════════════════════════════════════════════════════
+
+  minio:
+    image: minio/minio:latest
+    container_name: aeaop-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: miniosecret
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # ══════════════════════════════════════════════════════════════
+  #  SECURITY
+  # ══════════════════════════════════════════════════════════════
+
+  vault:
+    image: hashicorp/vault:1.16
+    container_name: aeaop-vault
+    command: server -dev -dev-root-token-id=dev-root-token
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: dev-root-token
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    cap_add:
+      - IPC_LOCK
+    ports:
+      - "8200:8200"
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    container_name: aeaop-keycloak
+    command: start-dev
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: aeaop
+      KC_DB_PASSWORD: aeaop_secret
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_HOSTNAME_STRICT: "false"
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ══════════════════════════════════════════════════════════════
+  #  AI MODELS
+  # ══════════════════════════════════════════════════════════════
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: aeaop-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    # GPU support (uncomment if NVIDIA GPU available):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+
+  # ══════════════════════════════════════════════════════════════
+  #  BACKEND SERVICES (Hot-reload for development)
+  # ══════════════════════════════════════════════════════════════
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: aeaop-auth
+    command: uvicorn backend.services.auth_service.main:app --reload --host 0.0.0.0 --port 8009
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://aeaop:aeaop_secret@postgres:5432/aeaop
+      REDIS_URL: redis://redis:6379/0
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      VAULT_ADDR: http://vault:8200
+    ports:
+      - "8009:8009"
+    volumes:
+      - .:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  noc-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: aeaop-noc
+    command: uvicorn backend.services.noc_service.main:app --reload --host 0.0.0.0 --port 8001
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://aeaop:aeaop_secret@postgres:5432/aeaop
+      REDIS_URL: redis://redis:6379/0
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      VAULT_ADDR: http://vault:8200
+      AI_SERVICE_PORT: 8006
+    ports:
+      - "8001:8001"
+    volumes:
+      - .:/app
+    depends_on:
+      - postgres
+      - redis
+      - kafka
+      - ai-service
+
+  soc-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: aeaop-soc
+    command: uvicorn backend.services.soc_service.main:app --reload --host 0.0.0.0 --port 8002
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://aeaop:aeaop_secret@postgres:5432/aeaop
+      REDIS_URL: redis://redis:6379/0
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+    ports:
+      - "8002:8002"
+    volumes:
+      - .:/app
+    depends_on:
+      - postgres
+      - redis
+      - kafka
+      - elasticsearch
+
+  ai-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: aeaop-ai
+    command: uvicorn backend.services.ai_service.main:app --reload --host 0.0.0.0 --port 8006
+    env_file: .env
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      VLLM_BASE_URL: http://vllm:8000/v1
+    ports:
+      - "8006:8006"
+    volumes:
+      - .:/app
+    depends_on:
+      ollama:
+        condition: service_healthy
+
+  rag-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: aeaop-rag
+    command: uvicorn backend.services.rag_service.main:app --reload --host 0.0.0.0 --port 8005
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://aeaop:aeaop_secret@postgres:5432/aeaop
+      QDRANT_HOST: qdrant
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+    ports:
+      - "8005:8005"
+    volumes:
+      - .:/app
+    depends_on:
+      - qdrant
+      - elasticsearch
+      - ai-service
+
+  healing-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: aeaop-healing
+    command: uvicorn backend.services.healing_service.main:app --reload --host 0.0.0.0 --port 8013
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://aeaop:aeaop_secret@postgres:5432/aeaop
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    ports:
+      - "8013:8013"
+    volumes:
+      - .:/app
+    depends_on:
+      - postgres
+      - kafka
+
+  # ══════════════════════════════════════════════════════════════
+  #  MONITORING
+  # ══════════════════════════════════════════════════════════════
+
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: aeaop-prometheus
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=30d"
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: aeaop-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+
+volumes:
+  postgres_data:
+  redis_data:
+  es_data:
+  qdrant_data:
+  minio_data:
+  kafka_data:
+  zk_data:
+  ollama_models:
+  prometheus_data:
+  grafana_data:

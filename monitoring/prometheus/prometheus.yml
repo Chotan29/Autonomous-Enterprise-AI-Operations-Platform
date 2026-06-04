@@ -1,0 +1,39 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    platform: aeaop
+
+scrape_configs:
+  - job_name: "aeaop-noc"
+    static_configs:
+      - targets: ["noc-service:8001"]
+    metrics_path: /metrics
+
+  - job_name: "aeaop-soc"
+    static_configs:
+      - targets: ["soc-service:8002"]
+
+  - job_name: "aeaop-ai"
+    static_configs:
+      - targets: ["ai-service:8006"]
+
+  - job_name: "aeaop-rag"
+    static_configs:
+      - targets: ["rag-service:8005"]
+
+  - job_name: "aeaop-healing"
+    static_configs:
+      - targets: ["healing-service:8013"]
+
+  - job_name: "postgres"
+    static_configs:
+      - targets: ["postgres:9187"]
+
+  - job_name: "redis"
+    static_configs:
+      - targets: ["redis:9121"]
+
+  - job_name: "kafka"
+    static_configs:
+      - targets: ["kafka:9101"]
