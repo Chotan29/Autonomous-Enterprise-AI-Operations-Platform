@@ -1,0 +1,32 @@
+:root { --nd-radius: 14px; }
+
+body { background:
+  radial-gradient(1200px 600px at 100% -10%, rgba(13,110,253,.12), transparent),
+  var(--bs-body-bg);
+}
+
+.card { border-radius: var(--nd-radius); border-color: rgba(255,255,255,.06); }
+
+/* ── Login ───────────────────────────────────────── */
+.login-wrapper { min-height: 100vh; padding: 1rem; }
+.login-card { width: 100%; max-width: 400px; border-radius: 18px; }
+
+/* ── Stat cards ──────────────────────────────────── */
+.stat-card .stat-label { font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; color: var(--bs-secondary-color); }
+.stat-card .stat-value { font-size: 2rem; font-weight: 700; line-height: 1.1; }
+.stat-card .stat-value-sm { font-size: 1rem; font-weight: 600; }
+.stat-card .stat-icon { font-size: 2rem; opacity: .35; }
+
+/* ── Table ───────────────────────────────────────── */
+.table thead th { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: var(--bs-secondary-color); border-bottom-width: 1px; }
+.table td { font-size: .88rem; }
+.mac, .ip { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .82rem; }
+
+.status-dot { display:inline-block; width:.6rem; height:.6rem; border-radius:50%; margin-right:.4rem; }
+.status-online { background:#22c55e; box-shadow:0 0 6px #22c55e; }
+.status-offline { background:#ef4444; }
+
+.type-badge { font-weight:600; }
+.gw-badge { font-size:.65rem; }
+
+.port-chip { font-size:.68rem; background: rgba(13,110,253,.15); color: var(--bs-info); padding:.05rem .35rem; border-radius:6px; margin:0 .1rem; display:inline-block; }

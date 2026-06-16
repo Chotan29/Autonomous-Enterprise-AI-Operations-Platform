@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · Network Discovery{% endblock %}
+{% block body %}
+<nav class="navbar navbar-expand bg-body-tertiary border-bottom px-3">
+  <span class="navbar-brand mb-0 h1"><i class="bi bi-hdd-network text-primary me-2"></i>Network Discovery</span>
+  <div class="ms-auto d-flex align-items-center gap-3">
+    <span class="text-secondary small d-none d-md-inline">v{{ version }}</span>
+    <span class="text-secondary small"><i class="bi bi-person-circle me-1"></i>{{ user }}</span>
+    <a href="logout" class="btn btn-sm btn-outline-secondary"><i class="bi bi-box-arrow-right"></i></a>
+  </div>
+</nav>
+
+<div class="container-fluid p-3 p-md-4">
+
+  <!-- Stat cards -->
+  <div class="row g-3 mb-4" id="stat-cards">
+    <div class="col-6 col-lg-3">
+      <div class="card stat-card h-100"><div class="card-body">
+        <div class="d-flex justify-content-between"><div>
+          <div class="stat-label">Online Devices</div>
+          <div class="stat-value text-success" id="stat-online">–</div>
+        </div><i class="bi bi-wifi stat-icon text-success"></i></div>
+      </div></div>
+    </div>
+    <div class="col-6 col-lg-3">
+      <div class="card stat-card h-100"><div class="card-body">
+        <div class="d-flex justify-content-between"><div>
+          <div class="stat-label">Total Known</div>
+          <div class="stat-value" id="stat-total">–</div>
+        </div><i class="bi bi-collection stat-icon text-info"></i></div>
+      </div></div>
+    </div>
+    <div class="col-6 col-lg-3">
+      <div class="card stat-card h-100"><div class="card-body">
+        <div class="d-flex justify-content-between"><div>
+          <div class="stat-label">Offline</div>
+          <div class="stat-value text-danger" id="stat-offline">–</div>
+        </div><i class="bi bi-wifi-off stat-icon text-danger"></i></div>
+      </div></div>
+    </div>
+    <div class="col-6 col-lg-3">
+      <div class="card stat-card h-100"><div class="card-body">
+        <div class="d-flex justify-content-between"><div>
+          <div class="stat-label">Last Scan</div>
+          <div class="stat-value-sm" id="stat-lastscan">Never</div>
+        </div><i class="bi bi-clock-history stat-icon text-warning"></i></div>
+      </div></div>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div class="card mb-3"><div class="card-body">
+    <div class="row g-2 align-items-center">
+      <div class="col-12 col-lg-4">
+        <div class="input-group">
+          <span class="input-group-text"><i class="bi bi-search"></i></span>
+          <input id="search" type="text" class="form-control" placeholder="Search IP, host, MAC, vendor…">
+        </div>
+      </div>
+      <div class="col-6 col-lg-3">
+        <select id="vendor-filter" class="form-select"><option value="">All vendors</option></select>
+      </div>
+      <div class="col-6 col-lg-2">
+        <select id="status-filter" class="form-select">
+          <option value="online" selected>Online only</option>
+          <option value="all">All</option>
+          <option value="offline">Offline</option>
+        </select>
+      </div>
+      <div class="col-12 col-lg-3 d-flex gap-2 justify-content-lg-end">
+        <button id="btn-scan" class="btn btn-primary flex-fill">
+          <span class="scan-idle"><i class="bi bi-arrow-repeat me-1"></i>Refresh Scan</span>
+          <span class="scan-busy d-none"><span class="spinner-border spinner-border-sm me-1"></span>Scanning…</span>
+        </button>
+        <div class="btn-group">
+          <button class="btn btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown"><i class="bi bi-download"></i></button>
+          <ul class="dropdown-menu dropdown-menu-end">
+            <li><a class="dropdown-item" href="api/export?fmt=csv">Export CSV</a></li>
+            <li><a class="dropdown-item" href="api/export?fmt=excel">Export Excel</a></li>
+            <li><a class="dropdown-item" href="api/export?fmt=json">Export JSON</a></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <div id="scan-msg" class="small text-secondary mt-2"></div>
+  </div></div>
+
+  <!-- Devices table -->
+  <div class="card mb-4"><div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Status</th><th>IP Address</th><th>MAC Address</th><th>Hostname</th>
+            <th>Vendor</th><th>Device Type</th><th>Ports</th><th>First Seen</th><th>Last Seen</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="device-rows">
+          <tr><td colspan="10" class="text-center text-secondary py-4">No data yet — run a scan.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div></div>
+
+  <!-- Scan history -->
+  <h6 class="text-secondary"><i class="bi bi-clock-history me-1"></i>Scan History</h6>
+  <div class="card"><div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-sm mb-0">
+        <thead><tr><th>#</th><th>Started</th><th>Subnet</th><th>Method</th><th>Hosts</th><th>Duration</th><th>By</th></tr></thead>
+        <tbody id="history-rows"><tr><td colspan="7" class="text-center text-secondary py-3">No scans yet.</td></tr></tbody>
+      </table>
+    </div>
+  </div></div>
+</div>
+
+<!-- Device history modal -->
+<div class="modal fade" id="histModal" tabindex="-1"><div class="modal-dialog modal-lg modal-dialog-scrollable">
+  <div class="modal-content">
+    <div class="modal-header"><h5 class="modal-title">Device History</h5>
+      <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body"><div class="table-responsive"><table class="table table-sm">
+      <thead><tr><th>Seen At</th><th>IP</th><th>Hostname</th><th>Type</th><th>Ports</th></tr></thead>
+      <tbody id="hist-body"></tbody></table></div></div>
+  </div>
+</div></div>
+{% endblock %}
+
+{% block scripts %}<script src="static/js/dashboard.js"></script>{% endblock %}

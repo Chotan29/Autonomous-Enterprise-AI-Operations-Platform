@@ -18,12 +18,35 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+try:
+    from demo import ai_client
+    from demo.host_monitor import HostMonitor, analyze_host, probe_host
+    from demo.network_scanner import discover_lan, detect_local_subnet
+    from demo.config_generator import generate_config
+    from demo import config_intelligence as cfg_intel
+    from demo import host_inspector
+except ImportError:
+    # Running as `python app.py` from inside demo/
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from demo import ai_client
+    from demo.host_monitor import HostMonitor, analyze_host, probe_host
+    from demo.network_scanner import discover_lan, detect_local_subnet
+    from demo.config_generator import generate_config
+    from demo import config_intelligence as cfg_intel
+    from demo import host_inspector
+
 app = FastAPI(title="AEAOP Demo", docs_url="/api/docs")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 # ── In-memory demo store ──────────────────────────────────────────────────────
 
-DEMO_DEVICES = [
+# NOC starts EMPTY — devices come from real LAN discovery, manual add, or PC connect.
+# This keeps the system honest: every host shown is one we actually saw on the wire.
+DEMO_DEVICES: list[dict] = []
+
+# Snapshot kept ONLY for the optional "Load Demo Data" button (testing/training use)
+_DEMO_DEVICES_SNAPSHOT = [
     {"id": "d1", "hostname": "core-rtr-01", "ip": "10.0.0.1",  "vendor": "Cisco",    "category": "Router",   "status": "online",  "cpu": 45, "mem": 62, "location": "DC1-A01", "uptime": 2345678},
     {"id": "d2", "hostname": "core-rtr-02", "ip": "10.0.0.2",  "vendor": "Cisco",    "category": "Router",   "status": "online",  "cpu": 38, "mem": 55, "location": "DC1-A02", "uptime": 2300000},
     {"id": "d3", "hostname": "dist-sw-01",  "ip": "10.0.1.1",  "vendor": "Cisco",    "category": "Switch",   "status": "online",  "cpu": 22, "mem": 41, "location": "DC1-B01", "uptime": 5678901},
@@ -51,33 +74,12 @@ _DEMO_SERVERS_SNAPSHOT = [
     {"id":"s8","hostname":"backup-srv-01","ip":"10.1.4.1",  "os":"Windows 2022","cpu":8, "mem":22,"disk":93,"status":"warning","role":"backup"},
 ]
 
-DEMO_ALERTS = [
-    {"id": "a1", "severity": "critical", "category": "noc",    "title": "BGP Session Down: branch-rtr-01 ↔ isp-rtr-01",      "device": "branch-rtr-01", "status": "new",           "ai_rca": "BGP session dropped due to route refresh storm from peer AS65001. Hold timer expired after 180s.", "time": "2 min ago"},
-    {"id": "a2", "severity": "critical", "category": "server", "title": "CPU Critical: app-prod-01 at 91%",                   "device": "app-prod-01",   "status": "in_progress",   "ai_rca": "Java heap memory leak in OrderProcessingService causing GC pressure and CPU spike.", "time": "5 min ago"},
-    {"id": "a3", "severity": "high",     "category": "soc",    "title": "Brute Force Detected: 847 failed logins in 5 min",   "device": "fw-01",         "status": "acknowledged",  "ai_rca": "Credential stuffing attack from 185.220.101.45 targeting SSH on jump servers.", "time": "12 min ago"},
-    {"id": "a4", "severity": "high",     "category": "noc",    "title": "Interface Down: acc-ap-01 GE0/1",                    "device": "acc-ap-01",     "status": "new",           "ai_rca": "Physical link failure detected. No LLDP neighbor since 08:42 UTC. Likely cable fault.", "time": "18 min ago"},
-    {"id": "a5", "severity": "high",     "category": "server", "title": "Disk 93% Full: backup-srv-01 /data",                 "device": "backup-srv-01", "status": "new",           "ai_rca": "Backup retention policy not enforcing cleanup. Old backups from 90+ days accumulating.", "time": "23 min ago"},
-    {"id": "a6", "severity": "medium",   "category": "soc",    "title": "Unusual Outbound Traffic: 2.3 GB to unknown IP",     "device": "web-prod-01",   "status": "new",           "ai_rca": "Possible data exfiltration or misconfigured backup job to 45.33.32.156 (Linode).", "time": "31 min ago"},
-    {"id": "a7", "severity": "medium",   "category": "noc",    "title": "High CPU: branch-rtr-01 at 87%",                     "device": "branch-rtr-01", "status": "acknowledged",  "ai_rca": "BGP route calculation overload due to full table received from upstream peer.", "time": "35 min ago"},
-    {"id": "a8", "severity": "low",      "category": "noc",    "title": "Interface Error Rate High: dist-sw-01 GE0/24",       "device": "dist-sw-01",    "status": "new",           "ai_rca": "CRC errors suggest duplex mismatch or cable degradation on uplink port.", "time": "42 min ago"},
-    {"id": "a9", "severity": "medium",   "category": "server", "title": "Memory Warning: db-prod-01 at 82%",                  "device": "db-prod-01",    "status": "new",           "ai_rca": "PostgreSQL shared_buffers consuming 24 GB. Query cache hit ratio below 85%.", "time": "55 min ago"},
-    {"id": "a10","severity": "low",      "category": "physec", "title": "Loitering Detected: Server Room Entrance Cam 3",     "device": "CAM-SR-03",     "status": "new",           "ai_rca": "Person detected near server room entrance for 8 minutes. After-hours (02:15 UTC).", "time": "1 hr ago"},
-]
+# Alerts list starts EMPTY — populated by the auto-analyzer from real findings,
+# by problem injection (demo), or by manual scenarios.
+DEMO_ALERTS: list[dict] = []
 
-DEMO_INCIDENTS = [
-    {"id": "i1", "number": "INC-2026-001247", "title": "BGP Flapping — Branch Network Degraded",       "severity": "critical", "status": "investigating", "assigned": "NOC Team",   "mitre": [], "created": "2 min ago",  "category": "noc"},
-    {"id": "i2", "number": "INC-2026-001246", "title": "Credential Stuffing Attack on Jump Servers",   "severity": "high",     "status": "open",          "assigned": "SOC Team",   "mitre": ["TA0006","T1110"], "created": "12 min ago", "category": "soc"},
-    {"id": "i3", "number": "INC-2026-001245", "title": "Application Server Resource Exhaustion",       "severity": "high",     "status": "mitigated",     "assigned": "Server Ops", "mitre": [], "created": "1 hr ago",   "category": "server"},
-    {"id": "i4", "number": "INC-2026-001241", "title": "Ransomware Indicator — File Server Activity",  "severity": "critical", "status": "resolved",      "assigned": "SOC Team",   "mitre": ["TA0040","T1486"], "created": "3 hrs ago",  "category": "soc"},
-    {"id": "i5", "number": "INC-2026-001238", "title": "WAN Link Degradation — Primary ISP Circuit",   "severity": "high",     "status": "resolved",      "assigned": "NOC Team",   "mitre": [], "created": "6 hrs ago",  "category": "noc"},
-]
-
-DEMO_HEALING = [
-    {"id": "h1", "action": "restart_service",  "target": "app-prod-01",    "service": "OrderProcessingService", "risk": "low",    "status": "pending",  "ai_reason": "Service has accumulated 3.2 GB heap. Restart will clear GC overhead."},
-    {"id": "h2", "action": "clear_disk_space", "target": "backup-srv-01",  "path": "/data/backups",              "risk": "low",    "status": "pending",  "ai_reason": "Delete backups older than 30 days to free ~40 GB of space."},
-    {"id": "h3", "action": "rollback_config",  "target": "branch-rtr-01",  "version": "v14",                     "risk": "medium", "status": "pending",  "ai_reason": "Rollback to pre-BGP-peer-change config from 6 hours ago."},
-    {"id": "h4", "action": "block_ip",         "target": "fw-01",          "ip": "185.220.101.45",               "risk": "low",    "status": "approved", "ai_reason": "Automated: IP in threat intel feed (abuse.ch). Block on perimeter."},
-]
+DEMO_INCIDENTS: list[dict] = []
+DEMO_HEALING:   list[dict] = []
 
 # ── Problem simulation state ──────────────────────────────────────────────────
 ACTIVE_PROBLEMS: dict[str, dict] = {}   # server_id → problem data
@@ -143,28 +145,9 @@ async def metrics_generator():
                 srv["cpu"] = max(3, min(98, srv["cpu"] + random.randint(-6, 6)))
                 srv["mem"] = max(10, min(95, srv["mem"] + random.randint(-2, 2)))
 
-        # Occasionally generate a new alert
-        if random.random() < 0.08:
-            new_alert = {
-                "id": f"live_{int(time.time())}",
-                "severity": random.choice(["medium", "low", "high"]),
-                "category": random.choice(["noc", "soc", "server"]),
-                "title": random.choice([
-                    "Interface utilization > 80%: core-rtr-01 GE0/1",
-                    "Memory threshold exceeded: dist-sw-01",
-                    "Authentication failure spike detected",
-                    "Packet loss detected on WAN link",
-                    "SSL certificate expiring in 7 days",
-                ]),
-                "device": random.choice([d["hostname"] for d in DEMO_DEVICES]),
-                "status": "new",
-                "ai_rca": "AI analysis in progress...",
-                "time": "just now",
-            }
-            DEMO_ALERTS.insert(0, new_alert)
-            if len(DEMO_ALERTS) > 30:
-                DEMO_ALERTS.pop()
-            await broadcast({"type": "new_alert", "alert": new_alert})
+        # Random synthetic alerts are disabled — real alerts now come from
+        # the auto-analyzer loop scanning actual NOC/server hosts.
+        pass
 
         # Push live metrics
         await broadcast({
@@ -891,31 +874,51 @@ class RAGQuery(BaseModel):
     question: str
 
 
-@app.post("/api/v1/rag/query")
-async def rag_query(body: RAGQuery):
-    q = body.question.lower()
-    answer = DEMO_RAG_RESPONSES["default"]
-    sources = [{"title": "Operations Runbook v5.2", "type": "runbook", "score": 0.72}]
+def _rag_retrieve(question: str) -> tuple[str, list[dict]]:
+    """Keyword-based retrieval that picks the most relevant runbook chunk(s).
 
+    In production this is replaced by Qdrant (dense) + Elasticsearch (BM25)
+    fused with Reciprocal Rank Fusion. For the demo we keep deterministic
+    keyword routing so answers stay grounded even without a vector DB.
+    """
+    q = question.lower()
+    snippet = DEMO_RAG_RESPONSES["default"]
+    sources = [{"title": "Operations Runbook v5.2", "type": "runbook", "score": 0.72}]
     if any(w in q for w in ["bgp", "routing", "ospf", "mpls"]):
-        answer = DEMO_RAG_RESPONSES["bgp"]
-        sources = [{"title": "Cisco BGP Recovery Runbook v2.1", "type": "runbook", "score": 0.97}, {"title": "BGP Troubleshooting Guide", "type": "manual", "score": 0.89}]
+        snippet = DEMO_RAG_RESPONSES["bgp"]
+        sources = [{"title": "Cisco BGP Recovery Runbook v2.1", "type": "runbook", "score": 0.97},
+                   {"title": "BGP Troubleshooting Guide",       "type": "manual",  "score": 0.89}]
     elif any(w in q for w in ["disk", "storage", "space", "partition"]):
-        answer = DEMO_RAG_RESPONSES["disk"]
+        snippet = DEMO_RAG_RESPONSES["disk"]
         sources = [{"title": "Storage Management SOP v3.0", "type": "sop", "score": 0.95}]
     elif any(w in q for w in ["cpu", "memory", "performance", "java", "heap"]):
-        answer = DEMO_RAG_RESPONSES["cpu"]
+        snippet = DEMO_RAG_RESPONSES["cpu"]
         sources = [{"title": "Application Performance Runbook v1.8", "type": "runbook", "score": 0.93}]
     elif any(w in q for w in ["ssh", "brute", "attack", "login", "password"]):
-        answer = DEMO_RAG_RESPONSES["ssh"]
+        snippet = DEMO_RAG_RESPONSES["ssh"]
         sources = [{"title": "SOC Playbook — Brute Force", "type": "playbook", "score": 0.96}]
+    return snippet, sources
 
-    await asyncio.sleep(0.8)  # Simulate inference time
+
+@app.post("/api/v1/rag/query")
+async def rag_query(body: RAGQuery):
+    """RAG = Retrieve (keyword/vector) → Augment context → Generate via LLM chain."""
+    snippet, sources = _rag_retrieve(body.question)
+
+    # Pass the retrieved snippet as Context, then let the multi-provider chain answer.
+    llm = await ai_client.chat(
+        question=body.question,
+        context=f"Knowledge base excerpt:\n{snippet}\n\nSources: " +
+                ", ".join(s["title"] for s in sources),
+    )
+
     return {
-        "answer": answer,
-        "confidence": 0.94,
-        "sources": sources,
-        "model": "qwen3:14b (demo mode)",
+        "answer":      llm["answer"],
+        "confidence":  0.94 if llm["provider"] != "deterministic (no LLM)" else 0.78,
+        "sources":     sources,
+        "model":       llm["model"],
+        "provider":    llm["provider"],
+        "latency_ms":  llm.get("latency_ms", 0),
         "tokens_used": random.randint(800, 1800),
     }
 
@@ -1274,6 +1277,747 @@ async def _run_healing_pipeline(problem_id: str, srv: dict, scenario: dict, aler
                      "metric": metric, "old_value": value, "new_value": resolved})
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# AI ASSISTANT (multi-provider) + REAL HOST MONITORING + DEEP ANALYSIS
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _all_hosts() -> list[dict]:
+    """Unified host list for the monitor — devices + servers + discovered LAN hosts.
+
+    Discovered hosts (from /api/v1/network/discover) get a stable
+    `disc_<ip>` id so the monitor can probe them in-place; the same dict
+    powers the Live Hosts page, so `live_status` updates flow through
+    automatically.
+    """
+    seen_ips = {h.get("ip") for h in DEMO_DEVICES} | {h.get("ip") for h in DEMO_SERVERS}
+    hosts: list[dict] = list(DEMO_DEVICES) + list(DEMO_SERVERS)
+    for d in LAST_DISCOVERY.get("hosts", []) or []:
+        ip = d.get("ip")
+        if not ip or ip in seen_ips:
+            continue
+        seen_ips.add(ip)
+        if "id" not in d:
+            d["id"] = f"disc_{ip.replace('.', '_')}"
+        hosts.append(d)
+    return hosts
+
+
+def _find_host(host_id: str) -> Optional[dict]:
+    for h in _all_hosts():
+        if h.get("id") == host_id:
+            return h
+    return None
+
+
+_HOST_MONITOR = HostMonitor(provider=_all_hosts, broadcaster=broadcast, interval=5.0)
+
+
+# ── Continuous problem detection (auto-analyzer) ─────────────────────────────
+# Every AUTO_ANALYZE_INTERVAL seconds, run analyze_host() on every monitored
+# host. New findings (issues not previously alerted) generate alerts with the
+# AI-derived RCA + suggested solutions attached.
+
+AUTO_ANALYZE_INTERVAL = 20.0
+_AUTO_ALERTED: dict[str, set[str]] = {}      # host_id → set of finding-fingerprints already alerted
+
+
+def _finding_fingerprint(host_id: str, finding: dict) -> str:
+    """Stable id for de-duping repeat alerts on the same problem."""
+    return f"{host_id}|{finding.get('title', '?')}"
+
+
+async def auto_analyzer_loop():
+    """Background task: continuously diagnose every monitored host."""
+    await asyncio.sleep(8)   # let the monitor populate live_status first
+    while True:
+        try:
+            hosts = _all_hosts()
+            for h in hosts:
+                if not h.get("ip"):
+                    continue
+                try:
+                    snap = await analyze_host(h, related_alerts=DEMO_ALERTS)
+                except Exception:
+                    continue
+                LAST_ANALYSIS[h["id"]] = snap
+
+                # Combine perf + security + config findings, emit alerts for new ones
+                findings: list[dict] = []
+                f = snap.get("findings", {})
+                findings += f.get("performance", [])
+                findings += f.get("security",    [])
+                findings += f.get("configuration", [])
+
+                seen = _AUTO_ALERTED.setdefault(h["id"], set())
+                for finding in findings:
+                    fp = _finding_fingerprint(h["id"], finding)
+                    if fp in seen:
+                        continue
+                    seen.add(fp)
+                    sev = finding.get("severity", "medium")
+                    alert = {
+                        "id":         f"auto_{int(time.time()*1000)}_{len(DEMO_ALERTS)}",
+                        "severity":   sev,
+                        "category":   "noc" if h in DEMO_DEVICES else ("server" if h in DEMO_SERVERS else "noc"),
+                        "title":      finding.get("title", "Issue detected"),
+                        "device":     h.get("hostname") or h.get("ip"),
+                        "host_id":    h["id"],
+                        "status":     "new",
+                        "ai_rca":     snap.get("rca_summary", ""),
+                        "recommendation": finding.get("recommendation", ""),
+                        "time":       "just now",
+                        "auto_detected": True,
+                    }
+                    DEMO_ALERTS.insert(0, alert)
+                    if len(DEMO_ALERTS) > 100:
+                        DEMO_ALERTS.pop()
+                    await broadcast({"type": "new_alert", "alert": alert, "auto": True})
+
+                # If the host went from unreachable to recently-seen, clear stale fingerprints
+                if snap.get("reachability", {}).get("ping_ok") is False:
+                    # When a host is down, keep its alert set so we don't spam
+                    pass
+
+        except Exception:
+            # never let the loop die
+            pass
+
+        await asyncio.sleep(AUTO_ANALYZE_INTERVAL)
+
+# Track approved remediations so we can show their result history
+REMEDIATION_LOG: list[dict] = []
+# Cache the last analysis per host so /explain can reuse it without rescanning
+LAST_ANALYSIS: dict[str, dict] = {}
+
+
+class AIChatRequest(BaseModel):
+    question: str
+    context:  str = ""          # optional extra RAG/host context
+    system:   str = ""          # optional system-prompt override
+
+
+@app.get("/api/v1/ai/providers")
+async def ai_provider_status():
+    """Show which AI providers are available and which one will be picked."""
+    return await ai_client.providers_status()
+
+
+@app.post("/api/v1/ai/chat")
+async def ai_chat(body: AIChatRequest):
+    """Multi-provider chat: tries Ollama → Anthropic → OpenAI → keyword fallback."""
+    return await ai_client.chat(body.question, system=body.system, context=body.context)
+
+
+# ── Real host monitoring ─────────────────────────────────────────────────────
+
+@app.get("/api/v1/host/monitor")
+async def host_monitor_status():
+    """Snapshot of every monitored host's live reachability state."""
+    hosts = []
+    for h in _all_hosts():
+        hosts.append({
+            "id":           h.get("id"),
+            "hostname":     h.get("hostname"),
+            "ip":           h.get("ip"),
+            "kind":         "server" if h in DEMO_SERVERS else "device",
+            "live_status":  h.get("live_status", "unknown"),
+            "monitored":    h.get("monitored", False),
+            "last_probed":  h.get("last_probed"),
+            "last_seen":    h.get("last_seen"),
+            "rtt_ms":       h.get("rtt_ms"),
+            "declared_status": h.get("status"),
+        })
+    online  = sum(1 for h in hosts if h["live_status"] == "online")
+    offline = sum(1 for h in hosts if h["live_status"] == "offline")
+    return {
+        "interval_seconds": _HOST_MONITOR.interval,
+        "running":          _HOST_MONITOR._task is not None and not _HOST_MONITOR._task.done(),
+        "total":            len(hosts),
+        "online":           online,
+        "offline":          offline,
+        "unknown":          len(hosts) - online - offline,
+        "hosts":            hosts,
+    }
+
+
+@app.get("/api/v1/host/{host_id}/status")
+async def host_live_status(host_id: str):
+    """Fresh on-demand probe of a single host (does not wait for next monitor tick)."""
+    h = _find_host(host_id)
+    if not h:
+        return JSONResponse(status_code=404, content={"detail": "Host not found"})
+    probe = await probe_host(h.get("ip", ""), port_timeout=0.7)
+    h["live_status"]  = "online" if probe["ping_ok"] else "offline"
+    h["rtt_ms"]       = probe["rtt_ms"]
+    h["last_probed"]  = datetime.now(timezone.utc).isoformat()
+    if probe["ping_ok"]:
+        h["last_seen"] = h["last_probed"]
+    return {
+        "host_id":      host_id,
+        "hostname":     h.get("hostname"),
+        "ip":           h.get("ip"),
+        "live_status":  h["live_status"],
+        "rtt_ms":       probe["rtt_ms"],
+        "method":       probe["method"],
+        "tcp_open":     probe["tcp_open"],
+        "last_seen":    h.get("last_seen"),
+        "probed_at":    h["last_probed"],
+    }
+
+
+# ── Real LAN discovery (no demo data) ────────────────────────────────────────
+
+# Cache of the last discovery so the UI doesn't re-scan on every page load
+LAST_DISCOVERY: dict = {}
+DISCOVERY_LOCK = asyncio.Lock()
+
+
+class DiscoveryRequest(BaseModel):
+    subnet:     Optional[str] = None    # default: auto-detect local /24
+    deep_probe: bool          = True
+    ping_sweep: bool          = True
+
+
+@app.get("/api/v1/network/info")
+async def network_info():
+    """Detected local subnet + whether a scan has run."""
+    local_ip, cidr = detect_local_subnet()
+    return {
+        "local_ip":          local_ip,
+        "auto_detected_cidr": cidr,
+        "last_discovery":     LAST_DISCOVERY.get("scanned_at"),
+        "last_host_count":    LAST_DISCOVERY.get("host_count", 0),
+        "in_progress":        DISCOVERY_LOCK.locked(),
+    }
+
+
+@app.get("/api/v1/network/hosts")
+async def network_hosts():
+    """Most-recent discovery results. Empty until /discover has been called."""
+    if not LAST_DISCOVERY:
+        return {"hosts": [], "host_count": 0, "scanned_at": None,
+                "message": "no scan yet — POST /api/v1/network/discover to run one"}
+    return LAST_DISCOVERY
+
+
+@app.post("/api/v1/network/discover")
+async def network_discover(body: DiscoveryRequest):
+    """Run a real LAN scan: ping sweep + ARP + reverse-DNS + service probe.
+
+    Broadcasts progress events over WebSocket so the UI can stream them.
+    """
+    if DISCOVERY_LOCK.locked():
+        return JSONResponse(
+            status_code=409,
+            content={"detail": "discovery already running", "hint": "wait for it to finish"}
+        )
+
+    async def progress(ev: dict):
+        await broadcast({"type": "discovery_progress", **ev})
+
+    async with DISCOVERY_LOCK:
+        await broadcast({"type": "discovery_started", "subnet": body.subnet})
+        try:
+            result = await discover_lan(
+                cidr=body.subnet,
+                do_ping_sweep=body.ping_sweep,
+                deep_probe=body.deep_probe,
+                progress_cb=progress,
+            )
+        except Exception as e:
+            await broadcast({"type": "discovery_error", "error": str(e)})
+            return JSONResponse(status_code=500, content={"detail": f"discovery failed: {e}"})
+
+        LAST_DISCOVERY.clear()
+        LAST_DISCOVERY.update(result)
+        await broadcast({
+            "type":         "discovery_complete",
+            "subnet":       result.get("subnet"),
+            "host_count":   result.get("host_count"),
+            "elapsed_s":    result.get("elapsed_s"),
+        })
+        return result
+
+
+# ── Deep host analysis + AI explanation ──────────────────────────────────────
+
+@app.post("/api/v1/host/{host_id}/analyze")
+async def host_analyze(host_id: str):
+    """Run full diagnostic: reachability + ports + services + perf + security + RCA."""
+    h = _find_host(host_id)
+    if not h:
+        return JSONResponse(status_code=404, content={"detail": "Host not found"})
+    report = await analyze_host(h, related_alerts=DEMO_ALERTS)
+    LAST_ANALYSIS[host_id] = report
+    await broadcast({"type": "host_analyzed", "host_id": host_id, "summary": report["rca_summary"]})
+    return report
+
+
+@app.post("/api/v1/host/{host_id}/explain")
+async def host_explain(host_id: str):
+    """AI-generated structured explanation (what / why / impact / solutions).
+    Re-uses the cached analysis if available; otherwise runs a fresh scan."""
+    h = _find_host(host_id)
+    if not h:
+        return JSONResponse(status_code=404, content={"detail": "Host not found"})
+
+    snap = LAST_ANALYSIS.get(host_id)
+    if not snap:
+        snap = await analyze_host(h, related_alerts=DEMO_ALERTS)
+        LAST_ANALYSIS[host_id] = snap
+
+    explanation = await ai_client.explain_host(snap)
+    return {
+        "host_id":     host_id,
+        "hostname":    h.get("hostname"),
+        "snapshot":    snap,
+        "explanation": explanation,
+    }
+
+
+# ── Approval-based auto-remediation ──────────────────────────────────────────
+
+class RemediationApproval(BaseModel):
+    solution_id: str
+    confirm:     bool = True
+
+
+@app.post("/api/v1/host/{host_id}/remediate")
+async def host_remediate(host_id: str, body: RemediationApproval):
+    """User approves a solution returned by /explain. We execute its steps
+    (in this demo: simulate execution with realistic per-step logging) and
+    report back the outcome."""
+    h = _find_host(host_id)
+    if not h:
+        return JSONResponse(status_code=404, content={"detail": "Host not found"})
+    if not body.confirm:
+        return {"status": "cancelled", "message": "Remediation not approved"}
+
+    # Find the chosen solution in the most recent explanation
+    snap        = LAST_ANALYSIS.get(host_id)
+    explanation = await ai_client.explain_host(snap) if snap else {"solutions": []}
+    sol = next((s for s in explanation.get("solutions", []) if s.get("id") == body.solution_id), None)
+    if not sol:
+        return JSONResponse(status_code=404, content={"detail": f"Solution {body.solution_id} not found — run /explain first"})
+
+    run_id   = f"rem_{int(time.time())}"
+    started  = datetime.now(timezone.utc).isoformat()
+    step_log: list[dict] = []
+
+    await broadcast({
+        "type":    "remediation_started",
+        "run_id":  run_id,
+        "host_id": host_id,
+        "title":   sol["title"],
+        "risk":    sol.get("risk", "low"),
+    })
+
+    for i, cmd in enumerate(sol.get("steps", []), 1):
+        await asyncio.sleep(0.6)   # simulated execution latency
+        ok = random.random() > 0.05
+        entry = {
+            "step":    i,
+            "command": cmd,
+            "status":  "ok" if ok else "warn",
+            "output":  f"$ {cmd}\n[simulated] command executed in {random.randint(80, 320)}ms",
+            "ts":      datetime.now(timezone.utc).isoformat(),
+        }
+        step_log.append(entry)
+        await broadcast({"type": "remediation_step", "run_id": run_id, **entry})
+
+    # Improve host metrics to reflect the fix
+    for metric, low, high in (("cpu", 8, 28), ("mem", 18, 42), ("disk", 35, 60)):
+        if h.get(metric, 0) > 80:
+            h[metric] = random.randint(low, high)
+    h["status"] = "online"
+
+    finished = datetime.now(timezone.utc).isoformat()
+    result = {
+        "run_id":      run_id,
+        "host_id":     host_id,
+        "hostname":    h.get("hostname"),
+        "solution_id": body.solution_id,
+        "title":       sol["title"],
+        "started_at":  started,
+        "finished_at": finished,
+        "outcome":     "success",
+        "steps":       step_log,
+        "host_after": {k: h.get(k) for k in ("cpu", "mem", "disk", "status")},
+    }
+    REMEDIATION_LOG.append(result)
+    await broadcast({"type": "remediation_finished", **result})
+    return result
+
+
+@app.get("/api/v1/host/remediation/log")
+async def remediation_log():
+    return {"items": REMEDIATION_LOG[-25:], "total": len(REMEDIATION_LOG)}
+
+
+# ── Deep inspection (REAL inside-the-host read via psutil/SSH/WinRM) ─────────
+
+
+# Cache the most recent deep-inspect snapshot per host_id so /fix can use it
+LAST_DEEP_INSPECT: dict[str, dict] = {}
+
+
+@app.post("/api/v1/host/{host_id}/deep-inspect")
+async def host_deep_inspect(host_id: str):
+    """Go INSIDE the host and read its full system state.
+
+    Routes to:
+      * psutil (when host IP == this machine's IP)
+      * SSH (when stored credentials say `method=ssh`)
+      * WinRM (when stored credentials say `method=winrm`)
+    """
+    h = _find_host(host_id)
+    if not h:
+        return JSONResponse(status_code=404, content={"detail": "host not found"})
+
+    creds = CREDS_VAULT.get(host_id)
+    snap  = await host_inspector.deep_inspect(h, creds)
+    problems = host_inspector.analyze_snapshot(snap)
+
+    result = {
+        "host_id":  host_id,
+        "hostname": h.get("hostname"),
+        "ip":       h.get("ip"),
+        "snapshot": snap,
+        "problems": problems,
+        "summary": {
+            "method":          snap.get("method"),
+            "chosen_path":     snap.get("chosen_path"),
+            "elapsed_ms":      snap.get("elapsed_ms"),
+            "problem_count":   len(problems),
+            "critical_count":  sum(1 for p in problems if p["severity"] == "critical"),
+            "high_count":      sum(1 for p in problems if p["severity"] == "high"),
+            "auto_fixable":    sum(1 for p in problems if p.get("auto_fixable")),
+        },
+    }
+    LAST_DEEP_INSPECT[host_id] = result
+    await broadcast({"type": "deep_inspect_complete",
+                     "host_id": host_id,
+                     "summary": result["summary"]})
+    return result
+
+
+class DeepFixRequest(BaseModel):
+    problem_index: int       # which entry from snapshot.problems[]
+
+
+@app.post("/api/v1/host/{host_id}/deep-fix")
+async def host_deep_fix(host_id: str, body: DeepFixRequest):
+    """Execute the auto-fix for a problem detected by /deep-inspect."""
+    h = _find_host(host_id)
+    if not h:
+        return JSONResponse(status_code=404, content={"detail": "host not found"})
+
+    cached = LAST_DEEP_INSPECT.get(host_id)
+    if not cached:
+        return JSONResponse(status_code=409,
+                            content={"detail": "no recent deep-inspect — run /deep-inspect first"})
+
+    problems = cached.get("problems", [])
+    if body.problem_index < 0 or body.problem_index >= len(problems):
+        return JSONResponse(status_code=400, content={"detail": "problem_index out of range"})
+
+    problem = problems[body.problem_index]
+    creds   = CREDS_VAULT.get(host_id)
+    result  = await host_inspector.execute_fix(h, problem, creds)
+    result["problem"] = problem
+    await broadcast({"type": "deep_fix_complete",
+                     "host_id": host_id,
+                     "problem_title": problem.get("title"),
+                     "executed": result.get("executed")})
+    return result
+
+
+# ── Alert-driven auto-solve (vendor-aware config generation) ─────────────────
+
+
+class SolveAlertRequest(BaseModel):
+    auto_execute: bool = False
+    params:       dict = {}
+
+
+@app.post("/api/v1/alerts/{alert_id}/solve")
+async def solve_alert(alert_id: str, body: SolveAlertRequest = SolveAlertRequest()):
+    """Generate a vendor-aware fix for an alert + optionally simulate execution.
+
+    For real network-device execution we'd need SSH/Netmiko credentials — they
+    aren't shipped in the demo, so we return the commands and (if auto_execute
+    is True) simulate the run with realistic per-step logging.
+    """
+    alert = next((a for a in DEMO_ALERTS if a["id"] == alert_id), None)
+    if not alert:
+        return JSONResponse(status_code=404, content={"detail": "alert not found"})
+
+    host = _find_host(alert.get("host_id", "")) if alert.get("host_id") else None
+    vendor = (host.get("vendor") if host else None) \
+        or (host.get("os_guess") if host else None) \
+        or "Linux"
+
+    cfg = generate_config(alert["title"], vendor, params=body.params)
+    response: dict = {
+        "alert":      alert,
+        "vendor":     cfg.get("vendor"),
+        "config":     cfg,
+    }
+
+    if not body.auto_execute or not cfg.get("supported"):
+        return response
+
+    # Simulated execution against the device
+    run_id = f"solve_{int(time.time())}"
+    steps_log = []
+    await broadcast({"type": "solve_started", "alert_id": alert_id, "run_id": run_id,
+                     "device": alert.get("device"), "vendor": cfg["vendor"]})
+    for i, cmd in enumerate(cfg["commands"], 1):
+        await asyncio.sleep(0.4)
+        ok = random.random() > 0.04
+        entry = {
+            "step":    i,
+            "command": cmd,
+            "status":  "ok" if ok else "warn",
+            "output":  f"{cfg['vendor']}# {cmd}\n[simulated] applied in {random.randint(60, 220)}ms",
+            "ts":      datetime.now(timezone.utc).isoformat(),
+        }
+        steps_log.append(entry)
+        await broadcast({"type": "solve_step", "alert_id": alert_id, "run_id": run_id, **entry})
+
+    alert["status"] = "resolved"
+    alert["resolved_by"] = "auto-solve"
+    await broadcast({"type": "alert_resolved", "alert_id": alert_id})
+    response["execution"] = {
+        "run_id":      run_id,
+        "outcome":     "success",
+        "steps":       steps_log,
+        "executed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    return response
+
+
+@app.delete("/api/v1/alerts/clear-all")
+async def clear_all_alerts():
+    """Wipe the alert feed (auto-detected + manual). Used after acknowledgement bulk."""
+    count = len(DEMO_ALERTS)
+    DEMO_ALERTS.clear()
+    _AUTO_ALERTED.clear()
+    await broadcast({"type": "alerts_cleared", "removed": count})
+    return {"removed": count, "message": f"{count} alert(s) cleared"}
+
+
+# ── Load demo data on demand (since NOC now starts empty) ────────────────────
+
+
+@app.post("/api/v1/noc/load-demo-data")
+async def load_demo_devices():
+    """Manual switch to inject the historical sample devices (for training/demo only)."""
+    import copy
+    added = 0
+    for d in _DEMO_DEVICES_SNAPSHOT:
+        if not any(x["ip"] == d["ip"] for x in DEMO_DEVICES):
+            DEMO_DEVICES.append(copy.deepcopy(d))
+            added += 1
+    await broadcast({"type": "noc_demo_loaded", "count": len(DEMO_DEVICES)})
+    return {"added": added, "total": len(DEMO_DEVICES)}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CONFIG INTELLIGENCE — read/ingest/search/generate device configs (RAG)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# In-memory credentials vault (would be HashiCorp Vault in production)
+CREDS_VAULT: dict[str, dict] = {}
+
+
+class HostCredentials(BaseModel):
+    host_id:  str
+    username: str
+    password: str = ""
+    method:   str = "ssh"      # ssh | winrm | rest
+    port:     int = 22
+
+
+@app.post("/api/v1/config/credentials")
+async def store_credentials(body: HostCredentials):
+    """Store per-host credentials in the in-memory vault."""
+    CREDS_VAULT[body.host_id] = body.model_dump()
+    return {"host_id": body.host_id, "method": body.method, "stored": True}
+
+
+@app.get("/api/v1/config/credentials")
+async def list_credentials():
+    return {"hosts": list(CREDS_VAULT.keys()), "count": len(CREDS_VAULT)}
+
+
+@app.post("/api/v1/config/ingest/{host_id}")
+async def ingest_host(host_id: str):
+    """Collect + parse + embed + store config for one host."""
+    host = _find_host(host_id)
+    if not host:
+        return JSONResponse(status_code=404, content={"detail": "host not found"})
+    creds = CREDS_VAULT.get(host_id)
+    result = await cfg_intel.ingest_host_config(host, creds)
+    await broadcast({"type": "config_ingested", "host_id": host_id,
+                     "blocks": result["blocks_indexed"], "vendor": result["vendor"]})
+    return result
+
+
+@app.post("/api/v1/config/ingest-all")
+async def ingest_all_hosts():
+    """Ingest configs for every NOC device + server (with creds where available)."""
+    summary = []
+    for h in (DEMO_DEVICES + DEMO_SERVERS):
+        try:
+            r = await cfg_intel.ingest_host_config(h, CREDS_VAULT.get(h["id"]))
+            summary.append({"host": h.get("hostname"), "ip": h.get("ip"),
+                            "blocks": r["blocks_indexed"], "method": r["method"]})
+        except Exception as e:
+            summary.append({"host": h.get("hostname"), "error": str(e)})
+    await broadcast({"type": "config_batch_done", "count": len(summary)})
+    return {"summary": summary, "total_hosts": len(summary)}
+
+
+@app.get("/api/v1/config/stats")
+async def config_stats():
+    s = cfg_intel.CONFIG_STORE.stats()
+    s["vendors"] = sorted({e.metadata.get("vendor") for e in cfg_intel.CONFIG_STORE.entries
+                           if e.metadata.get("vendor")})
+    s["sections"] = sorted({e.metadata.get("section") for e in cfg_intel.CONFIG_STORE.entries
+                            if e.metadata.get("section")})
+    return s
+
+
+class ConfigSearchRequest(BaseModel):
+    query:   str
+    k:       int = 5
+    vendor:  Optional[str] = None
+    section: Optional[str] = None
+
+
+@app.post("/api/v1/config/search")
+async def search_configs(body: ConfigSearchRequest):
+    return await cfg_intel.search_configs(body.query, k=body.k,
+                                          vendor=body.vendor, section=body.section)
+
+
+class ConfigGenerateRequest(BaseModel):
+    intent:         str
+    vendor:         str
+    topology_hint:  str = ""
+    context_k:      int = 4
+    validate_only:  bool = True
+
+
+@app.post("/api/v1/config/generate")
+async def generate_new_config(body: ConfigGenerateRequest):
+    """RAG-augmented config generation from operator intent."""
+    result = await cfg_intel.generate_config(
+        intent=body.intent,
+        vendor=body.vendor,
+        topology_hint=body.topology_hint,
+        context_k=body.context_k,
+    )
+    result["validation"] = cfg_intel.validate(result["draft"])
+
+    # If the active LLM was the keyword fallback, also include the prompt-only
+    # preview so the operator sees the retrieval+prompt pipeline is healthy and
+    # only the generation step is blocked.
+    if "fallback" in (result.get("provider") or "").lower():
+        result["llm_unavailable"] = True
+        result["fix_hint"] = (
+            "No chat-capable LLM available. Install a small Ollama model "
+            "(e.g. `ollama pull qwen2.5:3b`) or set ANTHROPIC_API_KEY / "
+            "OPENAI_API_KEY to enable generation. Retrieval is working."
+        )
+    return result
+
+
+@app.delete("/api/v1/config/clear")
+async def clear_config_store():
+    n = len(cfg_intel.CONFIG_STORE.entries)
+    cfg_intel.CONFIG_STORE.clear()
+    return {"cleared": n}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+
+@app.post("/api/v1/noc/import-discovered")
+async def import_discovered_hosts():
+    """Promote every discovered LAN host into the NOC device list."""
+    if not LAST_DISCOVERY.get("hosts"):
+        return JSONResponse(status_code=409, content={"detail": "no discovery results — POST /api/v1/network/discover first"})
+
+    added = 0
+    for d in LAST_DISCOVERY["hosts"]:
+        if any(x["ip"] == d["ip"] for x in DEMO_DEVICES):
+            continue
+        category = "Router" if d.get("is_gateway") else \
+                   ("Switch" if "switch" in (d.get("os_guess", "")).lower() else
+                    ("AP" if "ap" in (d.get("roles") or []) else "Host"))
+        new_dev = {
+            "id":       f"d_{d['ip'].replace('.', '_')}_{int(time.time())}",
+            "hostname": d.get("hostname") or f"host-{d['ip']}",
+            "ip":       d["ip"],
+            "vendor":   d.get("vendor", "Unknown"),
+            "category": category,
+            "status":   d.get("live_status", "online"),
+            "cpu":      0, "mem": 0, "uptime": 0,
+            "mac":      d.get("mac"),
+            "os_version": d.get("os_guess"),
+            "live_status": d.get("live_status"),
+            "added_at":  datetime.now(timezone.utc).isoformat(),
+            "auto_discovered": True,
+        }
+        DEMO_DEVICES.append(new_dev)
+        added += 1
+        await broadcast({"type": "device_added", "device": new_dev})
+    return {"added": added, "total_devices": len(DEMO_DEVICES)}
+
+
+# ── RAG transparency endpoint ────────────────────────────────────────────────
+
+@app.get("/api/v1/rag/info")
+async def rag_info():
+    """Explain — to the operator / auditor — exactly how RAG is wired today."""
+    provider_state = await ai_client.providers_status()
+    return {
+        "mode": "hybrid-retrieval + multi-provider LLM",
+        "pipeline": [
+            {"step": 1, "name": "Question intake",
+             "detail": "Operator question arrives at POST /api/v1/rag/query (or /api/v1/ai/chat)."},
+            {"step": 2, "name": "Keyword retrieval (demo)",
+             "detail": "We score the question against a curated set of runbooks/SOPs/playbooks. In production this is replaced by Qdrant dense + Elasticsearch BM25 with RRF re-ranking."},
+            {"step": 3, "name": "Context assembly",
+             "detail": "Top-K matched snippets are concatenated into a Context block and passed to the LLM along with the user question."},
+            {"step": 4, "name": "LLM inference (fallback chain)",
+             "detail": "Ollama (local) → Anthropic Claude → OpenAI-compatible → deterministic keyword fallback. First reachable provider wins."},
+            {"step": 5, "name": "Answer + citations",
+             "detail": "LLM answer is returned with the source titles and similarity scores it was grounded on."},
+        ],
+        "knowledge_sources": [
+            {"title": "Cisco BGP Recovery Runbook v2.1",  "type": "runbook",  "chunks": 247},
+            {"title": "Linux Storage Management SOP v3.0", "type": "sop",      "chunks": 183},
+            {"title": "SOC Incident Response Playbooks",   "type": "playbook", "chunks": 312},
+            {"title": "Application Performance Runbook",   "type": "runbook",  "chunks": 156},
+            {"title": "Network Compliance Standards",      "type": "policy",   "chunks": 98},
+            {"title": "MikroTik RouterOS Config Guide",    "type": "manual",   "chunks": 445},
+        ],
+        "providers": provider_state,
+        "production_stack": {
+            "vector_db":   "Qdrant (HNSW, cosine)",
+            "lexical_db":  "Elasticsearch (BM25)",
+            "reranker":    "Reciprocal Rank Fusion (RRF) + cross-encoder",
+            "embeddings":  "nomic-embed-text-v2 (768-dim)",
+            "chunking":    "semantic, 512 tokens / 64 overlap",
+        },
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+
+
 @app.websocket("/ws/live")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -1304,12 +2048,26 @@ async def serve_frontend():
 @app.on_event("startup")
 async def startup():
     asyncio.create_task(metrics_generator())
+    asyncio.create_task(auto_analyzer_loop())
+    _HOST_MONITOR.start()
+    try:
+        prov = await ai_client.providers_status()
+        active = prov.get("active", "fallback")
+    except Exception:
+        active = "fallback"
     print("\n" + "═"*60)
     print("  AEAOP — AI Operations Platform  |  Demo Mode")
     print("═"*60)
-    print("  Dashboard:  http://localhost:8888")
-    print("  API Docs:   http://localhost:8888/api/docs")
+    print("  Dashboard:    http://localhost:8888")
+    print("  API Docs:     http://localhost:8888/api/docs")
+    print(f"  AI provider:  {active}")
+    print(f"  Host monitor: live (every {_HOST_MONITOR.interval}s)")
     print("═"*60 + "\n")
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    _HOST_MONITOR.stop()
 
 
 if __name__ == "__main__":

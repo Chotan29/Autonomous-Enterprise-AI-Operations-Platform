@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Sign in · Network Discovery{% endblock %}
+{% block body %}
+<div class="login-wrapper d-flex align-items-center justify-content-center">
+  <div class="card login-card shadow-lg">
+    <div class="card-body p-4 p-md-5">
+      <div class="text-center mb-4">
+        <i class="bi bi-hdd-network display-5 text-primary"></i>
+        <h4 class="mt-2 mb-0">Network Discovery</h4>
+        <small class="text-secondary">Sign in to continue</small>
+      </div>
+      {% if error %}
+      <div class="alert alert-danger py-2" role="alert">
+        <i class="bi bi-exclamation-triangle me-1"></i>{{ error }}
+      </div>
+      {% endif %}
+      <form method="post" action="login">
+        <div class="mb-3">
+          <label class="form-label">Username</label>
+          <div class="input-group">
+            <span class="input-group-text"><i class="bi bi-person"></i></span>
+            <input type="text" name="username" class="form-control" autofocus required>
+          </div>
+        </div>
+        <div class="mb-4">
+          <label class="form-label">Password</label>
+          <div class="input-group">
+            <span class="input-group-text"><i class="bi bi-lock"></i></span>
+            <input type="password" name="password" class="form-control" required>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary w-100">
+          <i class="bi bi-box-arrow-in-right me-1"></i>Sign in
+        </button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

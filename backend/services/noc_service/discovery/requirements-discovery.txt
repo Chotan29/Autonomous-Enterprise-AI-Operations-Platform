@@ -1,0 +1,27 @@
+# Network Discovery Tool — runtime dependencies
+# Install standalone:  pip install -r requirements-discovery.txt
+#
+# Note: most of these are already pinned in the main project requirements.txt.
+# This file lets the discovery tool be installed on its own.
+
+# Web framework + server
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+jinja2==3.1.4
+python-multipart==0.0.12        # form parsing for the login page
+itsdangerous==2.2.0             # signed-cookie sessions (Starlette SessionMiddleware)
+
+# Auth / password hashing
+passlib[bcrypt]==1.7.4
+
+# Scanning
+python-nmap==0.7.1              # nmap host discovery (requires the nmap binary)
+scapy==2.6.1                    # ARP layer-2 sweep (needs root/admin)
+psutil==6.1.0                   # accurate netmask / interface detection
+
+# Export
+openpyxl==3.1.5                # Excel (.xlsx) export
+
+# Config
+pydantic==2.10.3
+pydantic-settings==2.7.0

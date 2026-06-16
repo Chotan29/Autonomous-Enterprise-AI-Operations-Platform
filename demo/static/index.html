@@ -266,6 +266,7 @@
     <div class="nav-item" onclick="showPage('noc',this)"><span class="nav-icon">🌐</span>NOC <span class="badge" id="nav-alert-count">—</span></div>
     <div class="nav-item" onclick="showPage('topology',this)"><span class="nav-icon">🗺</span>Topology</div>
     <div class="nav-item" onclick="showPage('soc',this)"><span class="nav-icon">🔐</span>SOC <span class="badge yellow" id="nav-inc-count">—</span></div>
+    <div class="nav-item" onclick="showPage('livehosts',this)"><span class="nav-icon">📡</span>Live Hosts <span class="badge green" id="nav-live-count">—</span></div>
     <div class="nav-item" onclick="showPage('servers',this)"><span class="nav-icon">🖥</span>Servers</div>
     <div class="nav-item" onclick="showPage('physec',this)"><span class="nav-icon">📷</span>Physical Security</div>
     <div class="nav-section">AI Engine</div>
@@ -275,6 +276,7 @@
     </div>
     <div class="nav-item" onclick="showPage('healing',this)"><span class="nav-icon">🔧</span>Self-Healing <span class="badge" id="nav-heal-count">—</span></div>
     <div class="nav-item" onclick="showPage('rag',this)"><span class="nav-icon">🧠</span>AI Assistant</div>
+    <div class="nav-item" onclick="showPage('configintel',this)"><span class="nav-icon">📚</span>Config Intelligence <span class="badge" id="nav-cfg-count">—</span></div>
   </nav>
   <div class="sidebar-footer">
     <div class="ai-status"><div class="ai-dot"></div>AI Engine: Online</div>
@@ -338,6 +340,36 @@
         </div>
       </div>
 
+      <!-- 🌐 Network Live Status — real LAN discovery summary -->
+      <div class="panel" style="margin-bottom:16px;cursor:pointer;" onclick="showPage('livehosts',document.querySelector('[onclick*=livehosts]'))">
+        <div class="panel-header">
+          <div class="panel-title">🌐 Network Live Status <span style="font-size:11px;color:var(--text3);font-weight:400;margin-left:8px;">— real-time LAN discovery</span></div>
+          <div id="dash-net-when" style="font-size:11px;color:var(--text3);">click to scan / view all</div>
+        </div>
+        <div class="panel-body" style="display:grid;grid-template-columns:1.2fr 1fr 1fr 1fr 2fr;gap:12px;">
+          <div>
+            <div class="stat-label">Subnet</div>
+            <div style="font-family:monospace;font-size:14px;color:var(--accent);margin-top:2px;" id="dash-net-subnet">—</div>
+          </div>
+          <div>
+            <div class="stat-label">Hosts found</div>
+            <div class="stat-value" style="font-size:24px;color:var(--text);" id="dash-net-total">0</div>
+          </div>
+          <div>
+            <div class="stat-label">🟢 Online</div>
+            <div class="stat-value c-green" style="font-size:24px;" id="dash-net-online">0</div>
+          </div>
+          <div>
+            <div class="stat-label">🔴 Offline</div>
+            <div class="stat-value c-red" style="font-size:24px;" id="dash-net-offline">0</div>
+          </div>
+          <div>
+            <div class="stat-label">Active hosts</div>
+            <div id="dash-net-preview" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;font-family:monospace;font-size:10px;max-height:48px;overflow:hidden;color:var(--text3);">— no scan yet — click to discover —</div>
+          </div>
+        </div>
+      </div>
+
       <div class="grid-70-30">
         <div class="panel">
           <div class="panel-header">
@@ -376,8 +408,17 @@
 
     <!-- ══════════════ NOC ══════════════ -->
     <div class="page" id="page-noc">
-      <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;align-items:center;">
+      <div style="display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap;align-items:center;">
         <button class="btn btn-primary" onclick="openAddDeviceModal()" style="font-weight:600;">➕ Add Device</button>
+        <button class="btn btn-ghost btn-sm" onclick="importDiscoveredToNOC()" title="Import all live LAN hosts">📡 Import Discovered</button>
+        <button class="btn btn-ghost btn-sm" onclick="showPage('livehosts',document.querySelectorAll('.nav-item')[4])">🛰️ Scan Network</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadNOCDemoData()" title="Load sample devices for training">📦 Demo Data</button>
+        <button class="btn btn-ghost btn-sm" onclick="clearAllAlerts()" style="color:var(--red)">🗑️ Clear Alerts</button>
+        <span style="margin-left:auto;display:flex;gap:6px;font-size:11px;color:var(--text3);">
+          <span id="noc-auto-status">🤖 Auto-analyzer: <strong style="color:var(--green)">on</strong> · every 30s</span>
+        </span>
+      </div>
+      <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;align-items:center;">
         <button class="btn btn-ghost btn-sm" onclick="filterAlerts(null)">All Alerts</button>
         <button class="btn btn-ghost btn-sm" onclick="filterAlerts('critical')" style="color:var(--red)">🔴 Critical</button>
         <button class="btn btn-ghost btn-sm" onclick="filterAlerts('high')" style="color:var(--orange)">🟠 High</button>
@@ -400,7 +441,7 @@
           <div class="panel" style="margin-bottom:14px;">
             <div class="panel-header"><div class="panel-title">📊 Devices</div></div>
             <table>
-              <thead><tr><th>Host</th><th>Vendor</th><th>Status</th><th>CPU</th></tr></thead>
+              <thead><tr><th>Host</th><th>Vendor</th><th>Status</th><th title="Live ICMP/TCP probe">●</th><th>CPU</th><th></th></tr></thead>
               <tbody id="device-table"></tbody>
             </table>
           </div>
@@ -455,6 +496,59 @@
       </div>
     </div>
 
+    <!-- ══════════════ LIVE HOSTS (real LAN discovery) ══════════════ -->
+    <div class="page" id="page-livehosts">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
+        <div>
+          <div style="font-size:14px;color:var(--text);font-weight:600;">📡 Network এ যেসব host এখন active</div>
+          <div style="font-size:12px;color:var(--text3);margin-top:2px;">Real LAN scan — ping sweep + ARP + reverse-DNS + port probe. Demo data নয়।</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <div style="font-size:11px;color:var(--text3);">Subnet:</div>
+          <input id="disc-subnet" class="form-input" placeholder="auto-detect"
+                 style="width:160px;font-family:monospace;font-size:11px;padding:5px 8px;"/>
+          <label style="font-size:11px;display:flex;align-items:center;gap:4px;color:var(--text3);">
+            <input type="checkbox" id="disc-deep" checked> deep probe
+          </label>
+          <button class="btn btn-primary" onclick="runDiscovery()" id="disc-btn" style="font-weight:600;">
+            🛰️ Scan Network এখনই
+          </button>
+        </div>
+      </div>
+
+      <!-- Summary tiles -->
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px;">
+        <div class="stat-card" style="padding:12px;"><div class="stat-label">Subnet</div><div class="stat-value" id="lh-subnet" style="font-size:14px;font-family:monospace;">—</div></div>
+        <div class="stat-card" style="padding:12px;"><div class="stat-label">Host count</div><div class="stat-value" id="lh-count" style="color:var(--accent);">0</div></div>
+        <div class="stat-card" style="padding:12px;"><div class="stat-label">Online</div><div class="stat-value" id="lh-online" style="color:var(--green);">0</div></div>
+        <div class="stat-card" style="padding:12px;"><div class="stat-label">Offline</div><div class="stat-value" id="lh-offline" style="color:var(--red);">0</div></div>
+        <div class="stat-card" style="padding:12px;"><div class="stat-label">Last scan</div><div class="stat-value" id="lh-when" style="font-size:12px;">never</div></div>
+      </div>
+
+      <!-- Progress / log strip -->
+      <div id="disc-progress" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px;font-family:monospace;font-size:11px;margin-bottom:14px;color:var(--text2);max-height:140px;overflow-y:auto;"></div>
+
+      <!-- Live hosts table -->
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">Discovered Hosts</div>
+          <div style="font-size:11px;color:var(--text3);">Click <strong style="color:var(--accent);">🔍 Analyze</strong> for deep AI-driven diagnosis</div>
+        </div>
+        <div class="panel-body" style="padding:0;">
+          <div id="lh-empty" style="text-align:center;padding:40px 20px;color:var(--text3);">
+            <div style="font-size:42px;margin-bottom:8px;">🛰️</div>
+            <div>এখনো scan করা হয়নি — উপরের <strong style="color:var(--text2);">Scan Network এখনই</strong> button click করো।</div>
+          </div>
+          <table class="data-table" id="lh-table-wrap" style="display:none;">
+            <thead><tr>
+              <th>IP</th><th>Hostname</th><th>Vendor (OUI)</th><th>OS / Type</th><th>MAC</th><th>Live</th><th>Open Ports</th><th>Actions</th>
+            </tr></thead>
+            <tbody id="lh-table"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <!-- ══════════════ SERVERS ══════════════ -->
     <div class="page" id="page-servers">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
@@ -483,7 +577,7 @@
           <div style="font-size:11px;color:var(--text3)" id="server-last-refresh">—</div>
         </div>
         <table>
-          <thead><tr><th>Hostname</th><th>IP</th><th>OS</th><th>Role</th><th>Status</th><th>CPU</th><th>Memory</th><th>Disk</th><th></th></tr></thead>
+          <thead><tr><th>Hostname</th><th>IP</th><th>OS</th><th>Role</th><th>Status</th><th title="Live reachability (ICMP/TCP probe every 8s)">● Live</th><th>CPU</th><th>Memory</th><th>Disk</th><th>Actions</th></tr></thead>
           <tbody id="server-table"></tbody>
         </table>
       </div>
@@ -729,7 +823,7 @@
               </div>
             </div>
           </div>
-          <div class="panel">
+          <div class="panel" style="margin-bottom:14px;">
             <div class="panel-header"><div class="panel-title">💡 Quick Queries</div></div>
             <div class="panel-body" style="display:flex;flex-direction:column;gap:8px;">
               <button class="btn btn-ghost btn-sm" style="text-align:left;width:100%" onclick="quickQuery('How to recover a failed BGP session on Cisco IOS-XE?')">BGP Session Recovery</button>
@@ -738,7 +832,147 @@
               <button class="btn btn-ghost btn-sm" style="text-align:left;width:100%" onclick="quickQuery('SSH brute force attack response procedure')">Brute Force Response</button>
             </div>
           </div>
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">⚙️ How RAG Works</div>
+              <button class="btn btn-ghost btn-sm" onclick="loadRAGInfo()" style="font-size:10px;padding:3px 8px;">refresh</button>
+            </div>
+            <div class="panel-body" id="rag-info-panel" style="font-size:11px;line-height:1.6;color:var(--text2);">
+              <em style="color:var(--text3)">click refresh to load…</em>
+            </div>
+          </div>
         </div>
+      </div>
+    </div>
+
+    <!-- ══════════════ CONFIG INTELLIGENCE ══════════════ -->
+    <div class="page" id="page-configintel">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;flex-wrap:wrap;gap:10px;">
+        <div>
+          <div style="font-size:14px;color:var(--text);font-weight:600;">📚 Device Configuration Intelligence</div>
+          <div style="font-size:12px;color:var(--text3);margin-top:2px;">Collect device configs → embed in vector DB → semantic search → RAG-augmented new-config generation</div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button class="btn btn-primary" onclick="ingestAllConfigs()" id="cfg-ingest-btn">🛰️ Ingest All Devices</button>
+          <button class="btn btn-ghost btn-sm" onclick="refreshConfigStats()">🔄 Refresh</button>
+          <button class="btn btn-danger btn-sm" onclick="clearConfigStore()">🗑️ Clear</button>
+        </div>
+      </div>
+
+      <!-- Stats tiles -->
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px;">
+        <div class="stat-card" style="padding:12px;"><div class="stat-label">Indexed blocks</div><div class="stat-value" id="cfg-total" style="color:var(--accent);">0</div></div>
+        <div class="stat-card" style="padding:12px;"><div class="stat-label">Vendors</div><div class="stat-value" id="cfg-vendors" style="font-size:14px;color:var(--text);">—</div></div>
+        <div class="stat-card" style="padding:12px;"><div class="stat-label">Sections</div><div class="stat-value" id="cfg-sections" style="font-size:14px;color:var(--text);">—</div></div>
+        <div class="stat-card" style="padding:12px;"><div class="stat-label">Embedding backend</div><div class="stat-value" id="cfg-backend" style="font-size:12px;color:var(--green);">—</div></div>
+        <div class="stat-card" style="padding:12px;"><div class="stat-label">Vector dim</div><div class="stat-value" id="cfg-dim" style="font-size:14px;color:var(--text);">—</div></div>
+      </div>
+
+      <div class="grid-60-40">
+        <!-- Left: Search + Generate -->
+        <div>
+          <!-- Semantic Search -->
+          <div class="panel" style="margin-bottom:14px;">
+            <div class="panel-header">
+              <div class="panel-title">🔎 Semantic Search</div>
+              <div style="font-size:11px;color:var(--text3);">Real embeddings, cosine similarity</div>
+            </div>
+            <div class="panel-body">
+              <div style="display:flex;gap:8px;margin-bottom:10px;">
+                <input class="form-input" id="cfg-search-q" placeholder='e.g. "show all VLAN trunks", "where is OSPF area 0 configured?", "SNMPv3 users"' style="flex:1;font-size:13px;"/>
+                <select class="form-input" id="cfg-search-vendor" style="width:120px;font-size:11px;">
+                  <option value="">All vendors</option>
+                  <option>Cisco</option><option>MikroTik</option><option>Juniper</option>
+                  <option>Fortinet</option><option>HP</option><option>Ubiquiti</option><option>Linux</option>
+                </select>
+                <button class="btn btn-primary" onclick="runConfigSearch()">Search</button>
+              </div>
+              <div id="cfg-search-results" style="font-size:11px;"></div>
+            </div>
+          </div>
+
+          <!-- RAG Generate -->
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">🛠️ Generate New Config from Intent</div>
+              <div style="font-size:11px;color:var(--text3);">RAG: retrieves similar past configs → LLM drafts</div>
+            </div>
+            <div class="panel-body">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
+                <select class="form-input" id="gen-vendor" style="font-size:13px;">
+                  <option>Cisco</option><option>MikroTik</option><option>Juniper</option>
+                  <option>Fortinet</option><option>HP</option><option>Ubiquiti</option><option>Linux</option>
+                </select>
+                <input class="form-input" id="gen-k" type="number" value="4" min="1" max="10" style="font-size:13px;" title="How many examples to retrieve"/>
+              </div>
+              <textarea class="form-input" id="gen-intent" rows="3" style="font-family:inherit;font-size:13px;width:100%;margin-bottom:8px;" placeholder='What do you want configured? e.g. "Add VLAN 100 named GUEST_WIFI, isolated from MGMT VLAN, trunked to core"'></textarea>
+              <textarea class="form-input" id="gen-topology" rows="2" style="font-family:inherit;font-size:12px;width:100%;margin-bottom:8px;color:var(--text2);" placeholder='Optional: physical layout hint, e.g. "Floor 3 access switch, uplink GE0/1 to core, existing VLANs 10/20/30"'></textarea>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <button class="btn btn-primary" onclick="runConfigGenerate()" id="gen-btn" style="font-weight:600;">🤖 Generate Config</button>
+                <span style="font-size:11px;color:var(--text3);">LLM uses retrieved examples as few-shot context</span>
+              </div>
+              <div id="gen-result" style="margin-top:12px;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: How it works + per-host status -->
+        <div>
+          <div class="panel" style="margin-bottom:14px;">
+            <div class="panel-header"><div class="panel-title">⚙️ Pipeline</div></div>
+            <div class="panel-body" style="font-size:11px;line-height:1.7;color:var(--text2);">
+              <div style="margin-bottom:6px;"><span style="color:var(--accent);font-weight:600;">1. Collect</span><br>SSH/REST/PowerShell pulls running-config. No creds? → vendor-matched sample.</div>
+              <div style="margin-bottom:6px;"><span style="color:var(--accent);font-weight:600;">2. Parse</span><br>Section detector splits into interfaces · VLANs · ACLs · routing · SNMP · users · NTP · syslog · etc.</div>
+              <div style="margin-bottom:6px;"><span style="color:var(--accent);font-weight:600;">3. Embed</span><br>Each block embedded via Ollama <code style="font-size:10px;">embeddinggemma</code>. Real 768-dim vectors.</div>
+              <div style="margin-bottom:6px;"><span style="color:var(--accent);font-weight:600;">4. Store</span><br>In-memory vector store (Qdrant-compatible API) + JSON persistence.</div>
+              <div style="margin-bottom:6px;"><span style="color:var(--accent);font-weight:600;">5. Retrieve</span><br>Operator query → cosine top-k with vendor/section filters.</div>
+              <div><span style="color:var(--accent);font-weight:600;">6. Generate</span><br>Retrieved snippets → LLM few-shot prompt → vendor-specific config draft + validation.</div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">🔑 Credentials Vault</div>
+              <span style="font-size:11px;color:var(--text3);">in-mem · would be Vault in prod</span>
+            </div>
+            <div class="panel-body" style="font-size:11px;">
+              <div id="creds-list" style="margin-bottom:10px;color:var(--text3);">No credentials stored — using sample fallback.</div>
+              <button class="btn btn-ghost btn-sm" onclick="openCredsModal()" style="font-size:11px;">➕ Add device credentials</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Credentials modal -->
+    <div class="modal-overlay hidden" id="creds-modal">
+      <div class="modal" style="width:480px;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
+          <div>
+            <div class="modal-title">🔑 Add Device Credentials</div>
+            <div class="modal-sub">Stored in memory — used only for SSH/REST config collection.</div>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="closeCredsModal()">✕</button>
+        </div>
+        <div class="form-group"><label class="form-label">Host (from NOC list)</label>
+          <select class="form-input" id="cred-host"></select>
+        </div>
+        <div class="form-group"><label class="form-label">Method</label>
+          <select class="form-input" id="cred-method">
+            <option value="ssh">SSH (Cisco/Juniper/MikroTik/Linux)</option>
+            <option value="winrm">WinRM (Windows)</option>
+            <option value="rest">REST API (Fortinet/Palo Alto)</option>
+          </select>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <div class="form-group"><label class="form-label">Username</label>
+            <input class="form-input" id="cred-user" placeholder="admin"/>
+          </div>
+          <div class="form-group"><label class="form-label">Password / API key</label>
+            <input class="form-input" id="cred-pass" type="password" placeholder="••••••••"/>
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="saveCredentials()" style="margin-top:8px;width:100%;">💾 Save Credentials</button>
       </div>
     </div>
 
@@ -1089,11 +1323,14 @@ function showPage(name, navEl) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('page-' + name).classList.add('active');
   if(navEl) navEl.classList.add('active');
-  const titles = {dashboard:'Dashboard',noc:'NOC — Network Operations',topology:'Network Topology',soc:'SOC — Security Operations',servers:'Server Operations',physec:'Physical Security AI',demo:'🎬 Live Demo — Connect All & Self-Healing',healing:'Self-Healing Engine',rag:'AI Knowledge Assistant'};
+  const titles = {dashboard:'Dashboard',noc:'NOC — Network Operations',topology:'Network Topology',soc:'SOC — Security Operations',servers:'Server Operations',livehosts:'📡 Live Hosts — Real LAN Discovery',physec:'Physical Security AI',demo:'🎬 Live Demo — Connect All & Self-Healing',healing:'Self-Healing Engine',rag:'AI Knowledge Assistant',configintel:'📚 Config Intelligence — RAG over Device Configs'};
   document.getElementById('page-title').textContent = titles[name] || name;
   if(name==='topology') setTimeout(loadTopology, 100);
   if(name==='soc') renderSOCCharts();
   if(name==='servers') renderServerCharts();
+  if(name==='rag') { loadRAGInfo(); loadAIProvider(); }
+  if(name==='livehosts') { loadNetworkInfo(); }
+  if(name==='configintel') { refreshConfigStats(); refreshCredsList(); }
 }
 
 // ── Fetch helpers ──────────────────────────────────────────────────────────
@@ -1201,7 +1438,8 @@ function alertRowHTML(a, showActions=true) {
       </div>
       ${a.ai_rca ? `<div class="ai-rca-tag">🤖 AI RCA: ${a.ai_rca.substring(0,80)}${a.ai_rca.length>80?'...':''}</div>` : ''}
     </div>
-    ${showActions ? `<div class="alert-actions">
+    ${showActions ? `<div class="alert-actions" style="display:flex;flex-direction:column;gap:4px;">
+      <button class="btn btn-primary btn-sm" onclick="solveAlert('${a.id}')" title="AI auto-solve with vendor config">🤖 Solve</button>
       <button class="btn btn-ghost btn-sm" onclick="ackAlert('${a.id}')">✓ Ack</button>
       <button class="btn btn-success btn-sm" onclick="resolveAlert('${a.id}')">✅ Resolve</button>
     </div>` : ''}
@@ -1246,18 +1484,26 @@ async function loadDevices() {
   if(!data) return;
   allDevices = data.items;
   const tbody = document.getElementById('device-table');
-  tbody.innerHTML = allDevices.map(d=>`
+  tbody.innerHTML = allDevices.map(d=>{
+    const live = liveHostState(d.id);
+    return `
     <tr>
       <td><span class="hostname">${d.hostname}</span><br><span style="font-size:10px;color:var(--text3)">${d.ip}</span></td>
       <td style="color:var(--text3)">${d.vendor}</td>
       <td><span class="badge-status s-${d.status}">${d.status}</span></td>
+      <td id="live-${d.id}">${liveStatusDot(live)}</td>
       <td>
         <div class="metric-bar">
           <div class="bar-track"><div class="bar-fill ${d.cpu>80?'bar-high':d.cpu>60?'bar-med':'bar-low'}" style="width:${d.cpu}%" id="cpu-bar-${d.id}"></div></div>
           <div style="font-size:10px;color:var(--text3);margin-top:1px" id="cpu-val-${d.id}">${d.cpu}%</div>
         </div>
       </td>
-    </tr>`).join('');
+      <td style="white-space:nowrap;">
+        <button class="btn btn-primary btn-sm" onclick="openAnalysis('${d.id}','${(d.hostname||'').replace(/'/g,"\\'")}')" style="font-size:10px;padding:2px 6px;" title="Outside-in port/perf scan">🔍</button>
+        <button class="btn btn-success btn-sm" onclick="openDeepInspect('${d.id}','${(d.hostname||'').replace(/'/g,"\\'")}')" style="font-size:10px;padding:2px 6px;" title="Read FULL system from inside (psutil/SSH/WinRM)">🔬</button>
+      </td>
+    </tr>`;
+  }).join('');
 }
 
 // ── Incidents ──────────────────────────────────────────────────────────────
@@ -1304,7 +1550,10 @@ async function loadServers() {
     return;
   }
 
-  tbody.innerHTML = allServers.map(s=>`
+  tbody.innerHTML = allServers.map(s=>{
+    const live = liveHostState(s.id);
+    const dot  = liveStatusDot(live);
+    return `
     <tr id="srow-${s.id}">
       <td>
         <span class="hostname">${s.hostname}</span>
@@ -1314,6 +1563,7 @@ async function loadServers() {
       <td style="color:var(--text3);font-size:12px">${s.os||'—'}</td>
       <td style="color:var(--text3);font-size:12px">${s.role||'—'}</td>
       <td><span class="badge-status s-${s.status}">${s.status}</span></td>
+      <td id="live-${s.id}">${dot}</td>
       <td>
         <div class="bar-track"><div class="bar-fill ${s.cpu>80?'bar-high':s.cpu>60?'bar-med':'bar-low'}" style="width:${s.cpu||0}%" id="scpu-${s.id}"></div></div>
         <div style="font-size:10px;color:var(--text3)" id="scpu-val-${s.id}">${s.cpu||0}%</div>
@@ -1326,11 +1576,16 @@ async function loadServers() {
         <div class="bar-track"><div class="bar-fill ${(s.disk||0)>90?'bar-high':(s.disk||0)>70?'bar-med':'bar-low'}" style="width:${s.disk||0}%"></div></div>
         <div style="font-size:10px;color:var(--text3)">${s.disk||0}%</div>
       </td>
-      <td>
-        <button class="btn btn-ghost btn-sm" onclick="removeServer('${s.id}','${s.hostname}')"
+      <td style="white-space:nowrap;">
+        <button class="btn btn-primary btn-sm" onclick="openAnalysis('${s.id}','${s.hostname.replace(/'/g,"\\'")}')"
+          style="font-size:11px;padding:3px 9px;margin-right:4px;" title="Outside-in port/perf scan">🔍 Analyze</button>
+        <button class="btn btn-success btn-sm" onclick="openDeepInspect('${s.id}','${s.hostname.replace(/'/g,"\\'")}')"
+          style="font-size:11px;padding:3px 9px;margin-right:4px;" title="Read FULL system from inside">🔬 Deep</button>
+        <button class="btn btn-ghost btn-sm" onclick="removeServer('${s.id}','${s.hostname.replace(/'/g,"\\'")}')"
           style="color:var(--red);font-size:11px;padding:3px 7px;" title="Remove">✕</button>
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 
   updateDemoServerGrid(allServers);
   updateStep1Status();
@@ -1691,6 +1946,19 @@ function connectWS() {
       renderNOCAlerts(allAlerts);
       renderDashAlerts(allAlerts.slice(0,6));
     }
+    if(d.type==='discovery_started')  { appendDiscoveryLog(`▶ Scan started: ${d.subnet||'auto'}`, 'var(--accent)'); }
+    if(d.type==='discovery_progress') {
+      if(d.phase==='ping_sweep') appendDiscoveryLog(`📡 ${d.msg}`);
+      else if(d.phase==='ping_done') appendDiscoveryLog(`✓ Ping sweep done — ${d.alive_count} responded`, 'var(--green)');
+      else if(d.phase==='arp_read') appendDiscoveryLog(`✓ ARP table: ${d.arp_entries} entries`);
+      else if(d.phase==='enrich') appendDiscoveryLog(`🔎 Enriching ${d.candidate_count} candidates...`);
+      else if(d.phase==='host_found') appendDiscoveryLog(`  └─ [${d.progress}/${d.total}] ${d.host.ip} (${d.host.vendor}) ${d.host.hostname||''}`);
+    }
+    if(d.type==='discovery_complete') { appendDiscoveryLog(`✅ Done — ${d.host_count} hosts in ${d.elapsed_s}s`, 'var(--green)'); refreshDashboardNetCard(); }
+    if(d.type==='discovery_error')    { appendDiscoveryLog(`✗ Error: ${d.error}`, 'var(--red)'); }
+    if(d.type==='host_status_change')  { applyLiveStatusChange(d); }
+    if(d.type==='host_analyzed')       { /* surfaced via modal already */ }
+    if(d.type==='remediation_step')    { /* shown in modal panel */ }
     if(d.type==='servers_reset')       { allServers=[]; loadServers(); toast('🗑️ All servers reset','warning'); }
     if(d.type==='server_removed')      { allServers=allServers.filter(s=>s.id!==d.server_id); loadServers(); }
     if(d.type==='demo_data_loaded')    { loadServers(); }
@@ -2444,12 +2712,917 @@ function handlePCDiscoveryUpdate(msg) {
   }
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// LIVE HOST STATUS + DEEP-ANALYSIS MODAL + APPROVAL FLOW
+// ══════════════════════════════════════════════════════════════════════════
+
+// In-memory cache of {host_id → {status, rtt_ms, ts}} fed by /host/monitor + WS
+const liveStatus = {};
+let liveStatusTimer = null;
+
+function liveHostState(id) { return liveStatus[id] || {status:'unknown'}; }
+
+function liveStatusDot(state) {
+  const s = state.status || 'unknown';
+  const color = {online:'#10b981',offline:'#ef4444',unknown:'#64748b'}[s] || '#64748b';
+  const label = {online:'online',offline:'offline',unknown:'probing…'}[s] || s;
+  const rtt = state.rtt_ms!=null ? ` · ${Math.round(state.rtt_ms)}ms` : '';
+  const pulse = s==='online' ? 'animation:pulse 2s infinite;' : '';
+  return `<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:${color}">
+    <span style="width:8px;height:8px;border-radius:50%;background:${color};${pulse}"></span>${label}${rtt}</span>`;
+}
+
+async function refreshLiveStatus() {
+  try {
+    const r = await fetch(`${API}/api/v1/host/monitor`);
+    if(!r.ok) return;
+    const d = await r.json();
+    d.hosts.forEach(h => {
+      liveStatus[h.id] = {status:h.live_status, rtt_ms:h.rtt_ms, ts:h.last_probed, ip:h.ip};
+      const cell = document.getElementById(`live-${h.id}`);
+      if(cell) cell.innerHTML = liveStatusDot(liveStatus[h.id]);
+    });
+    const banner = document.getElementById('live-banner');
+    if(banner) banner.textContent = `Live monitor: ${d.online} online · ${d.offline} offline · probe every ${d.interval_seconds}s`;
+  } catch(e) {}
+}
+
+function applyLiveStatusChange(d) {
+  liveStatus[d.host_id] = {status:d.current, rtt_ms:d.rtt_ms, ts:d.ts, ip:d.ip};
+  // Update every cell that has this id (NOC table, Server table, etc.)
+  document.querySelectorAll(`[id="live-${d.host_id}"]`).forEach(cell => {
+    cell.innerHTML = liveStatusDot(liveStatus[d.host_id]);
+  });
+  // Also update the discovered-host row (matched by IP, not ID)
+  updateDiscoveredRowByIP(d.ip, d.current, d.rtt_ms);
+  // Summary tiles + dashboard card
+  recomputeLiveHostsTiles();
+  refreshDashboardNetCard();
+  if(d.previous && d.previous !== 'unknown' && d.previous !== d.current) {
+    const icon = d.current==='online' ? '🟢' : '🔴';
+    toast(`${icon} ${d.hostname || d.ip} → ${d.current.toUpperCase()}`, d.current==='online'?'success':'warning');
+  }
+}
+
+// Find the discovered-host row by IP and update its Live cell live
+function updateDiscoveredRowByIP(ip, status, rtt_ms) {
+  if(!lastDiscovery) return;
+  const idx = lastDiscovery.hosts.findIndex(h => h.ip === ip);
+  if(idx < 0) return;
+  const h = lastDiscovery.hosts[idx];
+  h.live_status = status;
+  if(rtt_ms != null) h.rtt_ms = rtt_ms;
+  const cell = document.getElementById(`lh-live-${ip.replace(/\./g,'-')}`);
+  if(cell) {
+    const isOnline = status === 'online';
+    const dot = isOnline ? '🟢' : '🔴';
+    const rtt = rtt_ms != null ? `<span style="color:var(--text3);font-size:10px;"> · ${Math.round(rtt_ms)}ms</span>` : '';
+    cell.innerHTML = `${dot} <span style="font-size:11px;color:${isOnline?'var(--green)':'var(--red)'}">${status}</span>${rtt}`;
+    // Brief flash to draw the eye
+    cell.style.transition = 'background .3s';
+    cell.style.background = isOnline ? 'rgba(16,185,129,.15)' : 'rgba(239,68,68,.15)';
+    setTimeout(() => { cell.style.background = ''; }, 1200);
+  }
+}
+
+function recomputeLiveHostsTiles() {
+  if(!lastDiscovery) return;
+  const online = lastDiscovery.hosts.filter(h => h.live_status==='online').length;
+  const offline = lastDiscovery.hosts.length - online;
+  const onEl = document.getElementById('lh-online');
+  const offEl = document.getElementById('lh-offline');
+  if(onEl) onEl.textContent = online;
+  if(offEl) offEl.textContent = offline;
+  const nav = document.getElementById('nav-live-count');
+  if(nav) nav.textContent = online;
+}
+
+// ── Deep analysis modal ───────────────────────────────────────────────────
+let currentAnalysis = null;
+
+async function openAnalysis(hostId, hostname) {
+  const modal = document.getElementById('analysis-modal');
+  modal.classList.remove('hidden');
+  document.getElementById('an-title').textContent = `🔍 Deep Analysis — ${hostname}`;
+  document.getElementById('an-body').innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3)">🛰️ Probing host… scanning ports… correlating metrics…</div>';
+  document.getElementById('an-explain').innerHTML = '';
+  document.getElementById('an-solutions').innerHTML = '';
+
+  try {
+    const a = await fetch(`${API}/api/v1/host/${hostId}/analyze`, {method:'POST'});
+    const snap = await a.json();
+    renderAnalysisSnapshot(snap);
+
+    document.getElementById('an-explain').innerHTML = '<div style="padding:10px;color:var(--text3);font-size:12px;">🤖 Generating AI explanation…</div>';
+    const e = await fetch(`${API}/api/v1/host/${hostId}/explain`, {method:'POST'});
+    const data = await e.json();
+    currentAnalysis = {hostId, ...data};
+    renderExplanation(data.explanation);
+  } catch(err) {
+    document.getElementById('an-body').innerHTML = `<div style="color:var(--red);padding:20px;">Analysis failed: ${err}</div>`;
+  }
+}
+
+function closeAnalysis() {
+  document.getElementById('analysis-modal').classList.add('hidden');
+  currentAnalysis = null;
+}
+
+function renderAnalysisSnapshot(snap) {
+  const reach = snap.reachability||{};
+  const reachColor = reach.ping_ok ? 'var(--green)' : 'var(--red)';
+  const reachIcon  = reach.ping_ok ? '✓' : '✗';
+  const ports = (snap.ports?.open||[]);
+  const findings = snap.findings || {};
+  const fmt = arr => arr && arr.length ? arr.map(f=>{
+    const c = {critical:'var(--red)',high:'var(--orange)',medium:'var(--yellow)',low:'var(--text3)'}[f.severity]||'var(--text3)';
+    return `<div style="padding:6px 0;border-bottom:1px dashed rgba(255,255,255,.06);"><span style="color:${c};font-weight:600;font-size:10px;text-transform:uppercase;">[${f.severity}]</span> ${f.title}${f.recommendation?`<div style="font-size:11px;color:var(--text3);margin-top:2px;">→ ${f.recommendation}</div>`:''}</div>`;
+  }).join('') : '<div style="color:var(--text3);font-size:12px;">— none —</div>';
+
+  document.getElementById('an-body').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+      <div>
+        <div class="an-section-title">📡 Reachability</div>
+        <div style="font-size:12px;line-height:1.7;">
+          <div><span style="color:${reachColor};font-weight:bold">${reachIcon}</span> <strong>${reach.ping_ok ? 'Host is reachable':'Host is UNREACHABLE'}</strong></div>
+          <div>Method: <code>${reach.method||'—'}</code> · RTT: <code>${reach.rtt_ms!=null ? reach.rtt_ms+' ms':'—'}</code></div>
+          <div style="margin-top:4px;color:var(--text3);font-size:11px;">${snap.detected_role?.join(', ')||'role not detected'}</div>
+        </div>
+        <div class="an-section-title" style="margin-top:14px;">⚡ Performance</div>
+        ${fmt(findings.performance)}
+      </div>
+      <div>
+        <div class="an-section-title">🔌 Open Ports (${ports.length}/${snap.ports?.scanned||0} scanned)</div>
+        <div style="font-size:11px;font-family:monospace;max-height:120px;overflow-y:auto;">
+          ${ports.length ? ports.map(p=>`<div>tcp/<strong>${p.port}</strong> <span style="color:var(--text3)">— ${p.service}</span>${snap.ports.insecure.find(x=>x.port===p.port)?' <span style="color:var(--red);font-size:9px">⚠ INSECURE</span>':''}</div>`).join('') : '<div style="color:var(--text3)">no admin ports listening</div>'}
+        </div>
+        <div class="an-section-title" style="margin-top:14px;">🛡️ Security</div>
+        ${fmt(findings.security)}
+      </div>
+    </div>
+    <div class="an-section-title" style="margin-top:14px;">🧩 Configuration</div>
+    ${fmt(findings.configuration)}
+    <div class="an-section-title" style="margin-top:14px;">🧠 Root Cause Analysis</div>
+    <div style="background:var(--surface2);padding:10px;border-radius:6px;font-size:12px;line-height:1.6;border-left:3px solid var(--accent);">${snap.rca_summary}</div>
+  `;
+}
+
+function renderExplanation(exp) {
+  if(!exp) return;
+  const what   = exp.what   || '—';
+  const why    = exp.why    || '—';
+  const impact = exp.impact || '—';
+  const sols   = exp.solutions || [];
+  const provider = exp.provider || '';
+
+  document.getElementById('an-explain').innerHTML = `
+    <div class="an-section-title">🤖 AI Explanation <span style="font-size:10px;color:var(--text3);font-weight:normal;">via ${provider}</span></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;font-size:12px;">
+      <div style="background:var(--surface2);padding:10px;border-radius:6px;border-left:3px solid var(--accent);"><div style="font-weight:700;font-size:11px;color:var(--accent);text-transform:uppercase;letter-spacing:.5px;">What</div><div style="margin-top:4px;">${what}</div></div>
+      <div style="background:var(--surface2);padding:10px;border-radius:6px;border-left:3px solid var(--yellow);"><div style="font-weight:700;font-size:11px;color:var(--yellow);text-transform:uppercase;letter-spacing:.5px;">Why</div><div style="margin-top:4px;">${why}</div></div>
+      <div style="background:var(--surface2);padding:10px;border-radius:6px;border-left:3px solid var(--red);"><div style="font-weight:700;font-size:11px;color:var(--red);text-transform:uppercase;letter-spacing:.5px;">Impact</div><div style="margin-top:4px;">${impact}</div></div>
+    </div>`;
+
+  document.getElementById('an-solutions').innerHTML = sols.length === 0
+    ? '<div style="margin-top:12px;color:var(--green);font-size:13px;">✅ No remediation needed — host is healthy.</div>'
+    : `<div class="an-section-title" style="margin-top:14px;">🛠️ Suggested Solutions (lowest-risk first)</div>
+       ${sols.map(s=>{
+         const riskColor = {low:'var(--green)',medium:'var(--yellow)',high:'var(--red)'}[s.risk]||'var(--text3)';
+         const exec = s.auto_executable ? `<button class="btn btn-primary btn-sm" onclick="approveSolution('${s.id}')" style="font-size:11px;">✅ Approve &amp; Execute</button>` : `<span style="font-size:11px;color:var(--text3);">manual action required</span>`;
+         return `<div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px;margin-top:8px;">
+           <div style="display:flex;justify-content:space-between;align-items:center;">
+             <div style="font-weight:600;font-size:13px;">${s.title}</div>
+             <div style="display:flex;align-items:center;gap:8px;">
+               <span style="background:${riskColor}22;color:${riskColor};font-size:10px;padding:2px 8px;border-radius:4px;text-transform:uppercase;">risk: ${s.risk}</span>
+               ${exec}
+             </div>
+           </div>
+           <details style="margin-top:6px;"><summary style="cursor:pointer;font-size:11px;color:var(--text3);">show ${s.steps?.length||0} steps</summary>
+             <pre style="background:var(--bg);padding:8px;border-radius:4px;font-size:11px;margin-top:4px;white-space:pre-wrap;">${(s.steps||[]).map((c,i)=>`${i+1}. ${c}`).join('\n')}</pre>
+           </details>
+         </div>`;
+       }).join('')}`;
+}
+
+async function approveSolution(solId) {
+  if(!currentAnalysis) return;
+  const ok = confirm(`AEAOP will now execute the steps for "${solId}". Continue?`);
+  if(!ok) return;
+
+  const resultEl = document.getElementById('an-solutions');
+  resultEl.innerHTML += `<div id="rem-progress" style="margin-top:10px;padding:10px;background:var(--bg);border-radius:6px;font-family:monospace;font-size:11px;"><div style="color:var(--accent);">▶ Executing ${solId}…</div></div>`;
+
+  try {
+    const r = await fetch(`${API}/api/v1/host/${currentAnalysis.hostId}/remediate`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({solution_id:solId, confirm:true})
+    });
+    const d = await r.json();
+    const lines = (d.steps||[]).map(s=>`<div style="color:${s.status==='ok'?'var(--green)':'var(--yellow)'}">[${s.status.toUpperCase()}] ${s.command}</div>`).join('');
+    document.getElementById('rem-progress').innerHTML = `<div style="color:var(--green);font-weight:600;margin-bottom:4px;">✓ ${d.title} — outcome: ${d.outcome}</div>${lines}<div style="margin-top:6px;color:var(--text3)">Host metrics now → CPU ${d.host_after.cpu}% · Mem ${d.host_after.mem}% · Status: ${d.host_after.status}</div>`;
+    toast(`✓ Remediation completed: ${d.title}`, 'success', 4000);
+    loadServers();
+  } catch(err) {
+    document.getElementById('rem-progress').innerHTML = `<div style="color:var(--red)">✗ Remediation failed: ${err}</div>`;
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// REAL LAN DISCOVERY — Live Hosts page
+// ══════════════════════════════════════════════════════════════════════════
+
+let lastDiscovery = null;
+
+// ══════════════════════════════════════════════════════════════════════════
+// CONFIG INTELLIGENCE — RAG over device configs
+// ══════════════════════════════════════════════════════════════════════════
+
+async function refreshConfigStats() {
+  try {
+    const r = await fetch(`${API}/api/v1/config/stats`);
+    if(!r.ok) return;
+    const d = await r.json();
+    document.getElementById('cfg-total').textContent    = d.total_entries || 0;
+    document.getElementById('cfg-vendors').textContent  = (d.vendors||[]).join(', ') || '—';
+    document.getElementById('cfg-sections').textContent = (d.sections||[]).length + ' types';
+    document.getElementById('cfg-backend').textContent  = d.embed_backend || '—';
+    document.getElementById('cfg-dim').textContent      = (d.embed_dimension||0) + '-dim';
+    const nav = document.getElementById('nav-cfg-count');
+    if(nav) nav.textContent = d.total_entries || 0;
+  } catch(e) {}
+}
+
+async function ingestAllConfigs() {
+  const btn = document.getElementById('cfg-ingest-btn');
+  btn.disabled = true; btn.innerHTML = '⏳ Ingesting...';
+  try {
+    const r = await fetch(`${API}/api/v1/config/ingest-all`, {method:'POST'});
+    const d = await r.json();
+    toast(`📚 Indexed ${d.summary.reduce((a,s)=>a+(s.blocks||0),0)} config blocks from ${d.total_hosts} hosts`, 'success', 5000);
+    refreshConfigStats();
+  } catch(e) {
+    toast(`Ingest failed: ${e}`, 'warning');
+  } finally {
+    btn.disabled = false; btn.innerHTML = '🛰️ Ingest All Devices';
+  }
+}
+
+async function clearConfigStore() {
+  if(!confirm('Wipe the configuration vector store?')) return;
+  const r = await fetch(`${API}/api/v1/config/clear`, {method:'DELETE'});
+  const d = await r.json();
+  toast(`🗑️ ${d.cleared} entries cleared`, 'warning');
+  refreshConfigStats();
+}
+
+async function runConfigSearch() {
+  const q = document.getElementById('cfg-search-q').value.trim();
+  if(!q) return;
+  const vendor = document.getElementById('cfg-search-vendor').value || null;
+  const el = document.getElementById('cfg-search-results');
+  el.innerHTML = '<div style="color:var(--text3);padding:10px;">🔎 searching…</div>';
+  try {
+    const r = await fetch(`${API}/api/v1/config/search`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({query:q, k:5, vendor})
+    });
+    const d = await r.json();
+    if(!d.results?.length) { el.innerHTML = '<div style="color:var(--text3);padding:10px;">No results.</div>'; return; }
+    el.innerHTML = `<div style="font-size:11px;color:var(--text3);margin-bottom:6px;">backend: ${d.backend} · top ${d.results.length} of ${d.results.length}</div>` +
+      d.results.map(r=>{
+        const score = Math.round(r.score*100);
+        const sc = score>60?'var(--green)':score>40?'var(--yellow)':'var(--text3)';
+        return `<div style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:6px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;margin-bottom:4px;">
+            <div><strong>${r.vendor||'?'}</strong> · <code>${r.section}</code> · ${r.host||'?'} (${r.ip||'?'})</div>
+            <div style="color:${sc};font-weight:600;">${score}% similarity</div>
+          </div>
+          <pre style="font-size:10px;color:var(--text2);background:var(--bg);padding:6px;border-radius:4px;max-height:120px;overflow:auto;white-space:pre-wrap;margin:0;">${r.text.replace(/</g,'&lt;')}</pre>
+        </div>`;
+      }).join('');
+  } catch(e) {
+    el.innerHTML = `<div style="color:var(--red);padding:10px;">Search failed: ${e}</div>`;
+  }
+}
+
+async function runConfigGenerate() {
+  const intent = document.getElementById('gen-intent').value.trim();
+  if(!intent) { toast('Enter your intent','warning'); return; }
+  const vendor   = document.getElementById('gen-vendor').value;
+  const topology = document.getElementById('gen-topology').value.trim();
+  const k        = parseInt(document.getElementById('gen-k').value, 10) || 4;
+  const out = document.getElementById('gen-result');
+  out.innerHTML = '<div style="padding:14px;color:var(--text3);font-size:12px;">🛰️ Retrieving similar configs · 🤖 Generating draft…</div>';
+  const btn = document.getElementById('gen-btn');
+  btn.disabled = true;
+  try {
+    const r = await fetch(`${API}/api/v1/config/generate`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({intent, vendor, topology_hint:topology, context_k:k}),
+    });
+    const d = await r.json();
+    const v = d.validation || {};
+    const verdictColor = v.verdict==='ok'?'var(--green)':v.verdict==='warn'?'var(--yellow)':'var(--red)';
+    const citeList = (d.citations||[]).map(c=>
+      `<li style="font-size:11px;color:var(--text3);"><strong style="color:var(--accent);">${Math.round(c.score*100)}%</strong> — ${c.vendor} / ${c.section} from <em>${c.host||'?'}</em></li>`
+    ).join('');
+    const unavailable = d.llm_unavailable
+      ? `<div style="background:rgba(245,158,11,.1);border:1px solid var(--yellow);color:var(--yellow);padding:8px;border-radius:6px;font-size:11px;margin-bottom:10px;">
+           ⚠️ Generation LLM unavailable — retrieval pipeline is healthy, see citations above. ${d.fix_hint || ''}
+         </div>`
+      : '';
+    out.innerHTML = `
+      <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">model: <code>${d.model}</code> · provider: ${d.provider}</div>
+      ${unavailable}
+      <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px;">
+        <div>
+          <div style="font-weight:600;font-size:12px;margin-bottom:4px;">📝 Draft</div>
+          <pre style="background:var(--bg);padding:10px;border-radius:6px;font-size:11px;max-height:300px;overflow:auto;white-space:pre-wrap;">${(d.draft||'').replace(/</g,'&lt;')}</pre>
+          <div style="font-size:11px;margin-top:6px;color:${verdictColor};">
+            ✓ ${v.lines||0} lines · verdict: <strong>${v.verdict||'?'}</strong>${v.issues?.length?` · ${v.issues.length} issue(s)`:''}
+          </div>
+        </div>
+        <div>
+          <div style="font-weight:600;font-size:12px;margin-bottom:4px;">📚 Grounded on (RAG citations)</div>
+          <ul style="padding-left:18px;margin:0;">${citeList || '<li style="color:var(--text3)">no citations</li>'}</ul>
+          <div style="margin-top:10px;font-size:11px;color:var(--text3);">context: ${d.context_used_chars} chars passed to LLM</div>
+        </div>
+      </div>`;
+  } catch(e) {
+    out.innerHTML = `<div style="color:var(--red);padding:10px;">Generation failed: ${e}</div>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ── Credentials vault modal ────────────────────────────────────────────────
+function openCredsModal() {
+  // Populate host dropdown from NOC devices + servers
+  const sel = document.getElementById('cred-host');
+  sel.innerHTML = '';
+  [...allDevices, ...allServers].forEach(d => {
+    const o = document.createElement('option');
+    o.value = d.id; o.textContent = `${d.hostname || d.ip} (${d.ip})`;
+    sel.appendChild(o);
+  });
+  document.getElementById('creds-modal').classList.remove('hidden');
+}
+function closeCredsModal() { document.getElementById('creds-modal').classList.add('hidden'); }
+
+async function saveCredentials() {
+  const host_id = document.getElementById('cred-host').value;
+  if(!host_id) { toast('Pick a host','warning'); return; }
+  const body = {
+    host_id,
+    username: document.getElementById('cred-user').value,
+    password: document.getElementById('cred-pass').value,
+    method:   document.getElementById('cred-method').value,
+  };
+  const r = await fetch(`${API}/api/v1/config/credentials`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(body),
+  });
+  if(r.ok) { toast(`🔑 Credentials saved for ${host_id}`, 'success'); closeCredsModal(); refreshCredsList(); }
+}
+
+async function refreshCredsList() {
+  try {
+    const r = await fetch(`${API}/api/v1/config/credentials`);
+    const d = await r.json();
+    const el = document.getElementById('creds-list');
+    if(!el) return;
+    el.innerHTML = d.count
+      ? d.hosts.map(h=>`<div style="font-size:11px;font-family:monospace;color:var(--green);">🔑 ${h}</div>`).join('')
+      : '<span style="color:var(--text3);">No credentials stored — using sample fallback.</span>';
+  } catch(e) {}
+}
+
+// ── NOC quick-actions: import discovered, load demo, clear alerts ─────────
+async function importDiscoveredToNOC() {
+  const r = await fetch(`${API}/api/v1/noc/import-discovered`, {method:'POST'});
+  if(r.status === 409) {
+    toast('First scan the network — opening Live Hosts...', 'warning');
+    showPage('livehosts', document.querySelectorAll('.nav-item')[4]);
+    return;
+  }
+  const d = await r.json();
+  toast(`📡 ${d.added} live host(s) imported to NOC`, 'success', 4000);
+  await loadDevices();
+}
+
+async function loadNOCDemoData() {
+  const r = await fetch(`${API}/api/v1/noc/load-demo-data`, {method:'POST'});
+  const d = await r.json();
+  toast(`📦 ${d.added} sample device(s) loaded`, 'info', 4000);
+  await loadDevices();
+}
+
+async function clearAllAlerts() {
+  if(!confirm('Clear ALL alerts?')) return;
+  const r = await fetch(`${API}/api/v1/alerts/clear-all`, {method:'DELETE'});
+  const d = await r.json();
+  allAlerts = [];
+  renderNOCAlerts(allAlerts);
+  renderDashAlerts([]);
+  toast(`🗑️ ${d.removed} alert(s) cleared`, 'warning');
+}
+
+// One-click "Solve" — generates vendor config + runs simulated execution
+async function solveAlert(alertId) {
+  const alert = allAlerts.find(a => a.id === alertId);
+  if(!alert) return;
+  const msg = `AEAOP will analyze "${alert.title}" on ${alert.device}, generate a vendor-aware fix, and simulate execution.\n\nProceed?`;
+  if(!confirm(msg)) return;
+  const r = await fetch(`${API}/api/v1/alerts/${alertId}/solve`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({auto_execute:true}),
+  });
+  const d = await r.json();
+  if(!d.config?.supported) {
+    toast(`⚠️ No automated recipe for "${alert.title}" on ${d.vendor}. Manual review needed.`, 'warning', 6000);
+    return;
+  }
+  const stepCount = d.execution?.steps?.length || 0;
+  toast(`✅ "${alert.title}" auto-solved (${stepCount} commands executed on ${d.vendor})`, 'success', 6000);
+  // Re-render alerts
+  alert.status = 'resolved';
+  renderNOCAlerts(allAlerts);
+  renderDashAlerts(allAlerts.slice(0,6));
+}
+
+async function refreshDashboardNetCard() {
+  try {
+    const r = await fetch(`${API}/api/v1/network/hosts`);
+    if(!r.ok) return;
+    const d = await r.json();
+    const hosts = d.hosts || [];
+    document.getElementById('dash-net-subnet').textContent = d.subnet || '—';
+    document.getElementById('dash-net-total').textContent  = d.host_count || 0;
+    const online = hosts.filter(h=>h.live_status==='online');
+    document.getElementById('dash-net-online').textContent  = online.length;
+    document.getElementById('dash-net-offline').textContent = hosts.length - online.length;
+    const when = d.scanned_at ? new Date(d.scanned_at).toLocaleTimeString() : null;
+    const whenEl = document.getElementById('dash-net-when');
+    if(whenEl) whenEl.textContent = when ? `last scan: ${when}` : 'click to scan / view all';
+    const prev = document.getElementById('dash-net-preview');
+    if(prev) {
+      prev.innerHTML = online.length
+        ? online.slice(0,8).map(h=>`<span style="background:rgba(16,185,129,.1);color:var(--green);padding:2px 6px;border-radius:3px;">${h.ip}${h.hostname && h.hostname!=='—'?' '+h.hostname.substring(0,12):''}</span>`).join('')
+          + (online.length > 8 ? `<span style="color:var(--text3);">+${online.length-8} more</span>` : '')
+        : '<span style="color:var(--text3);">— click "Live Hosts" to scan —</span>';
+    }
+  } catch(e) {}
+}
+
+async function loadNetworkInfo() {
+  try {
+    const r = await fetch(`${API}/api/v1/network/info`);
+    if(!r.ok) return;
+    const d = await r.json();
+    const subInput = document.getElementById('disc-subnet');
+    if(subInput && !subInput.value) subInput.placeholder = d.auto_detected_cidr || 'auto-detect';
+    document.getElementById('lh-subnet').textContent = d.auto_detected_cidr || '—';
+    if(d.last_host_count > 0) await loadDiscoveredHosts();
+  } catch(e) {}
+}
+
+async function loadDiscoveredHosts() {
+  try {
+    const r = await fetch(`${API}/api/v1/network/hosts`);
+    if(!r.ok) return;
+    const d = await r.json();
+    if(d.hosts && d.hosts.length) renderDiscoveredHosts(d);
+  } catch(e) {}
+}
+
+async function runDiscovery() {
+  const btn = document.getElementById('disc-btn');
+  const subnet = document.getElementById('disc-subnet').value.trim() || null;
+  const deep = document.getElementById('disc-deep').checked;
+  const prog = document.getElementById('disc-progress');
+  prog.style.display = 'block';
+  prog.innerHTML = '<div style="color:var(--accent)">▶ Starting LAN scan...</div>';
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Scanning...';
+
+  try {
+    const r = await fetch(`${API}/api/v1/network/discover`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({subnet, ping_sweep:true, deep_probe:deep}),
+    });
+    const d = await r.json();
+    if(!r.ok) {
+      prog.innerHTML += `<div style="color:var(--red)">✗ ${d.detail || 'scan failed'}</div>`;
+      return;
+    }
+    lastDiscovery = d;
+    renderDiscoveredHosts(d);
+    toast(`✓ Scan complete — found ${d.host_count} active host(s) in ${d.elapsed_s}s`, 'success', 5000);
+  } catch(e) {
+    prog.innerHTML += `<div style="color:var(--red)">✗ ${e}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '🛰️ Scan Network এখনই';
+  }
+}
+
+function appendDiscoveryLog(line, color='var(--text3)') {
+  const prog = document.getElementById('disc-progress');
+  if(!prog || prog.style.display === 'none') return;
+  const d = document.createElement('div');
+  d.style.color = color;
+  d.textContent = line;
+  prog.appendChild(d);
+  prog.scrollTop = prog.scrollHeight;
+}
+
+function renderDiscoveredHosts(d) {
+  lastDiscovery = d;
+  const tbl = document.getElementById('lh-table');
+  const wrap = document.getElementById('lh-table-wrap');
+  const empty = document.getElementById('lh-empty');
+  const hosts = d.hosts || [];
+
+  document.getElementById('lh-subnet').textContent = d.subnet || '—';
+  document.getElementById('lh-count').textContent = d.host_count || 0;
+  document.getElementById('lh-online').textContent = hosts.filter(h => h.live_status==='online').length;
+  document.getElementById('lh-offline').textContent = hosts.filter(h => h.live_status!=='online').length;
+  document.getElementById('lh-when').textContent = d.scanned_at ? new Date(d.scanned_at).toLocaleTimeString() : 'never';
+  const navBadge = document.getElementById('nav-live-count');
+  if(navBadge) navBadge.textContent = hosts.filter(h => h.live_status==='online').length;
+
+  if(!hosts.length) {
+    wrap.style.display = 'none';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+  wrap.style.display = 'table';
+
+  tbl.innerHTML = hosts.map((h, i) => {
+    const isOnline = h.live_status === 'online';
+    const dot = isOnline ? '🟢' : '🔴';
+    const rtt = h.rtt_ms != null ? `<span style="color:var(--text3);font-size:10px;"> · ${Math.round(h.rtt_ms)}ms</span>` : '';
+    const ports = (h.open_ports || []).map(p => {
+      const insecure = [21,23,69,161,512,513,514].includes(p.port);
+      return `<span title="${p.service}" style="display:inline-block;background:${insecure?'rgba(239,68,68,.15)':'rgba(59,130,246,.12)'};color:${insecure?'var(--red)':'var(--accent)'};padding:1px 6px;border-radius:3px;font-size:10px;margin:1px;font-family:monospace;">${p.port}</span>`;
+    }).join('') || '<span style="color:var(--text3);font-size:10px;">none</span>';
+    const tags = [];
+    if(h.is_gateway) tags.push('<span style="background:rgba(245,158,11,.15);color:var(--yellow);font-size:9px;padding:1px 5px;border-radius:3px;margin-left:4px;">GATEWAY</span>');
+    if(h.is_local_host) tags.push('<span style="background:rgba(99,102,241,.15);color:var(--accent2);font-size:9px;padding:1px 5px;border-radius:3px;margin-left:4px;">THIS PC</span>');
+    return `<tr>
+      <td style="font-family:monospace;font-size:12px;">${h.ip}${tags.join('')}</td>
+      <td style="font-size:12px;color:var(--text)">${h.hostname || '—'}</td>
+      <td style="font-size:11px;color:var(--text2)">${h.vendor || 'Unknown'}</td>
+      <td style="font-size:11px;color:var(--text2)">${h.os_guess || '—'}${h.roles?.length?` <span style="color:var(--text3);font-size:10px;">(${h.roles.join(', ')})</span>`:''}</td>
+      <td style="font-family:monospace;font-size:10px;color:var(--text3)">${h.mac || '—'}</td>
+      <td id="lh-live-${h.ip.replace(/\./g,'-')}">${dot} <span style="font-size:11px;color:${isOnline?'var(--green)':'var(--red)'}">${h.live_status}</span>${rtt}</td>
+      <td>${ports}</td>
+      <td style="white-space:nowrap;">
+        <button class="btn btn-primary btn-sm" onclick="analyzeDiscovered(${i})" style="font-size:10px;padding:3px 7px;">🔍 Analyze</button>
+        <button class="btn btn-ghost btn-sm" onclick="addToMonitor(${i})" style="font-size:10px;padding:3px 7px;" title="Add to live monitor">➕ Monitor</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function analyzeDiscovered(idx) {
+  if(!lastDiscovery) return;
+  const h = lastDiscovery.hosts[idx];
+  if(!h) return;
+  // We need a host_id — first add it to monitored devices, then open the modal.
+  toast(`🔍 Adding ${h.ip} to monitor & analyzing...`, 'info');
+  const r = await fetch(`${API}/api/v1/noc/devices`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      hostname: h.hostname && h.hostname !== '—' ? h.hostname : `host-${h.ip.replace(/\./g,'-')}`,
+      ip: h.ip,
+      vendor: h.vendor || 'Unknown',
+      category: h.is_gateway ? 'Router' : (h.os_guess.toLowerCase().includes('windows') ? 'Server' : 'Host'),
+      snmp_community:'public',
+    }),
+  });
+  if(r.ok) {
+    const data = await r.json();
+    setTimeout(() => openAnalysis(data.device_id, data.device.hostname), 800);
+  } else if(r.status === 409) {
+    // Already exists — find it and analyze
+    const dr = await fetch(`${API}/api/v1/noc/devices`);
+    const dl = (await dr.json()).items || [];
+    const existing = dl.find(d => d.ip === h.ip);
+    if(existing) openAnalysis(existing.id, existing.hostname);
+  }
+}
+
+async function addToMonitor(idx) {
+  if(!lastDiscovery) return;
+  const h = lastDiscovery.hosts[idx];
+  if(!h) return;
+  const r = await fetch(`${API}/api/v1/noc/devices`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      hostname: h.hostname && h.hostname !== '—' ? h.hostname : `host-${h.ip.replace(/\./g,'-')}`,
+      ip: h.ip,
+      vendor: h.vendor || 'Unknown',
+      category: h.is_gateway ? 'Router' : 'Host',
+      snmp_community:'public',
+    }),
+  });
+  if(r.ok) toast(`➕ ${h.ip} added to NOC monitoring`, 'success');
+  else if(r.status === 409) toast(`Already monitored: ${h.ip}`, 'info');
+  else toast(`Failed to add ${h.ip}`, 'warning');
+}
+
+// Live monitor polling loop — refreshes /api/v1/host/monitor every 10s.
+// (WebSocket "host_status_change" events update individual rows instantly.)
+async function startLiveMonitor() {
+  await refreshLiveStatus();
+  if(liveStatusTimer) clearInterval(liveStatusTimer);
+  liveStatusTimer = setInterval(refreshLiveStatus, 10000);
+}
+
+// Show the active AI provider in the RAG chat header
+async function loadRAGInfo() {
+  const el = document.getElementById('rag-info-panel');
+  if(!el) return;
+  el.innerHTML = '<em>loading…</em>';
+  try {
+    const r = await fetch(`${API}/api/v1/rag/info`);
+    const d = await r.json();
+    const pipe = (d.pipeline||[]).map(p=>`<div style="margin:4px 0;"><span style="color:var(--accent);font-weight:600;">${p.step}. ${p.name}</span><div style="color:var(--text3);font-size:10px;">${p.detail}</div></div>`).join('');
+    const provs = d.providers?.providers || {};
+    const provList = Object.entries(provs).map(([k,v])=>{
+      const ok = v.available;
+      return `<div>${ok?'🟢':'⚪'} <strong>${k}</strong> — ${ok?'active':'unavailable'}${v.resolved_model?` <span style="color:var(--text3)">(${v.resolved_model})</span>`:v.model?` <span style="color:var(--text3)">(${v.model})</span>`:''}${v.last_error?`<div style="color:var(--red);font-size:10px;">${v.last_error.slice(0,140)}</div>`:''}</div>`;
+    }).join('');
+    el.innerHTML = `
+      <div style="font-weight:600;color:var(--text);margin-bottom:6px;">🔁 ${d.mode}</div>
+      ${pipe}
+      <div style="margin-top:10px;font-weight:600;color:var(--text);">🤖 Provider Chain (active = first ✓)</div>
+      ${provList}
+      <div style="margin-top:10px;font-weight:600;color:var(--text);">🏗️ Production Stack</div>
+      <div style="font-size:10px;color:var(--text3);">
+        Vector: ${d.production_stack.vector_db}<br>
+        Lexical: ${d.production_stack.lexical_db}<br>
+        Rerank: ${d.production_stack.reranker}<br>
+        Embed: ${d.production_stack.embeddings}
+      </div>`;
+  } catch(e) { el.innerHTML = `<span style="color:var(--red)">error: ${e}</span>`; }
+}
+
+async function loadAIProvider() {
+  try {
+    const r = await fetch(`${API}/api/v1/ai/providers`);
+    if(!r.ok) return;
+    const d = await r.json();
+    const active = d.active || 'fallback';
+    const prov = d.providers[active] || {};
+    const badge = document.querySelector('#page-rag .panel-header > div:last-child');
+    if(badge) {
+      const model = prov.resolved_model || prov.model || 'keyword';
+      const color = active==='fallback' ? 'var(--yellow)' : 'var(--green)';
+      badge.style.background = `${color}22`;
+      badge.style.color = color;
+      badge.innerHTML = `● ${active} <span style="opacity:.7;font-size:10px;">(${model})</span>`;
+      if(prov.last_error) badge.title = prov.last_error;
+    }
+  } catch(e) {}
+}
+
 // ── Init ───────────────────────────────────────────────────────────────────
 async function init() {
   await Promise.all([loadDashboard(), loadDevices(), loadServers(), loadIncidents(), loadCameras()]);
   connectWS();
+  startLiveMonitor();
+  loadAIProvider();
+  refreshDashboardNetCard();
+  loadNetworkInfo();
+  refreshConfigStats();
 }
 init();
 </script>
+
+<!-- ══════════ DEEP ANALYSIS MODAL ══════════ -->
+<style>
+  .an-section-title{font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px;}
+  @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.6;transform:scale(1.4)}}
+</style>
+<div class="modal-overlay hidden" id="analysis-modal">
+  <div class="modal" style="width:880px;max-height:90vh;overflow-y:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;">
+      <div>
+        <div class="modal-title" id="an-title">🔍 Deep Host Analysis</div>
+        <div class="modal-sub">Reachability · ports · services · perf · security · root cause + AI recommendation</div>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="closeAnalysis()">✕</button>
+    </div>
+    <div id="an-body"></div>
+    <div id="an-explain" style="margin-top:14px;"></div>
+    <div id="an-solutions"></div>
+  </div>
+</div>
+
+<!-- ══════════ DEEP INSPECT MODAL (inside-the-host) ══════════ -->
+<div class="modal-overlay hidden" id="deep-modal">
+  <div class="modal" style="width:1000px;max-height:92vh;overflow-y:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;">
+      <div>
+        <div class="modal-title" id="deep-title">🔬 Deep System Inspection</div>
+        <div class="modal-sub">REAL inside-the-host read via psutil (local) / SSH (Linux) / WinRM (Windows)</div>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="closeDeepInspect()">✕</button>
+    </div>
+    <div id="deep-body" style="font-size:12px;"></div>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════════════════════
+// DEEP INSPECTION (inside-the-host)
+// ══════════════════════════════════════════════════════════════════════════
+
+let currentDeep = null;
+
+async function openDeepInspect(hostId, hostname) {
+  const m = document.getElementById('deep-modal');
+  m.classList.remove('hidden');
+  document.getElementById('deep-title').textContent = `🔬 Deep Inspect — ${hostname}`;
+  document.getElementById('deep-body').innerHTML =
+    '<div style="text-align:center;padding:40px;color:var(--text3)">🛰️ Connecting → reading inside → analyzing…<br><br>(local: psutil · remote: SSH/WinRM with stored creds)</div>';
+
+  try {
+    const r = await fetch(`${API}/api/v1/host/${hostId}/deep-inspect`, {method:'POST'});
+    const d = await r.json();
+    currentDeep = {hostId, ...d};
+    renderDeepInspect(d);
+  } catch(e) {
+    document.getElementById('deep-body').innerHTML = `<div style="color:var(--red);padding:20px;">Inspection failed: ${e}</div>`;
+  }
+}
+
+function closeDeepInspect() {
+  document.getElementById('deep-modal').classList.add('hidden');
+  currentDeep = null;
+}
+
+function renderDeepInspect(d) {
+  const snap = d.snapshot || {};
+  const sum  = d.summary  || {};
+  const probs = d.problems || [];
+
+  if(snap.error) {
+    document.getElementById('deep-body').innerHTML = `
+      <div style="background:rgba(245,158,11,.1);border:1px solid var(--yellow);padding:12px;border-radius:6px;">
+        <div style="font-weight:600;color:var(--yellow);">⚠️ ${snap.error}</div>
+        <div style="margin-top:6px;color:var(--text3);font-size:11px;">${snap.hint || ''}</div>
+        <div style="margin-top:10px;font-size:11px;">→ Go to <strong>📚 Config Intelligence</strong> page and add credentials for this host (host_id: <code>${d.host_id}</code>).</div>
+      </div>`;
+    return;
+  }
+
+  const os   = snap.os || {};
+  const cpu  = snap.cpu || {};
+  const mem  = snap.memory || {};
+  const swp  = snap.swap || {};
+  const disks = snap.disks || [];
+  const ifaces = snap.interfaces || [];
+  const sock = snap.listening_sockets || [];
+
+  // Summary banner
+  const probBadge = (sum.problem_count||0) === 0
+    ? '<span style="background:rgba(16,185,129,.15);color:var(--green);padding:3px 10px;border-radius:4px;font-weight:600;">✓ No problems detected</span>'
+    : `<span style="background:rgba(239,68,68,.15);color:var(--red);padding:3px 10px;border-radius:4px;font-weight:600;">${sum.problem_count} problem(s) — ${sum.critical_count} critical · ${sum.high_count} high</span>`;
+
+  let html = `
+    <div style="display:flex;justify-content:space-between;align-items:center;background:var(--surface2);padding:10px;border-radius:6px;margin-bottom:14px;font-size:11px;">
+      <div><span style="color:var(--text3)">path:</span> <strong>${sum.chosen_path}</strong> · <span style="color:var(--text3)">elapsed:</span> ${sum.elapsed_ms}ms</div>
+      ${probBadge}
+    </div>
+
+    <!-- Stats grid -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px;">
+      <div class="stat-card" style="padding:10px;">
+        <div class="stat-label">OS</div>
+        <div style="font-size:13px;color:var(--text);font-weight:600;margin-top:4px;">${os.name||'?'} ${os.release||''}</div>
+        <div style="font-size:10px;color:var(--text3);">${os.hostname||''}</div>
+      </div>
+      <div class="stat-card" style="padding:10px;">
+        <div class="stat-label">CPU</div>
+        <div class="stat-value" style="font-size:22px;color:${(cpu.percent_total||0)>80?'var(--red)':(cpu.percent_total||0)>60?'var(--yellow)':'var(--green)'};">${cpu.percent_total||0}%</div>
+        <div style="font-size:10px;color:var(--text3);">${cpu.physical_cores||'?'} cores · ${cpu.logical_cores||'?'} threads</div>
+      </div>
+      <div class="stat-card" style="padding:10px;">
+        <div class="stat-label">Memory</div>
+        <div class="stat-value" style="font-size:22px;color:${(mem.percent||0)>85?'var(--red)':(mem.percent||0)>70?'var(--yellow)':'var(--green)'};">${mem.percent||0}%</div>
+        <div style="font-size:10px;color:var(--text3);">${mem.used_gb||0} / ${mem.total_gb||0} GB</div>
+      </div>
+      <div class="stat-card" style="padding:10px;">
+        <div class="stat-label">Uptime</div>
+        <div class="stat-value" style="font-size:14px;color:var(--text);">${formatUptime(os.uptime_seconds)}</div>
+        <div style="font-size:10px;color:var(--text3);">since ${(os.boot_time||'').slice(0,19)}</div>
+      </div>
+    </div>
+
+    <!-- Disks -->
+    <div class="an-section-title">💾 Disks</div>
+    <table style="width:100%;font-size:11px;margin-bottom:14px;">
+      <thead><tr style="color:var(--text3);text-align:left;border-bottom:1px solid var(--border);">
+        <th>Mount</th><th>Filesystem</th><th>Used</th><th>Total</th><th style="width:200px;">Usage</th>
+      </tr></thead>
+      <tbody>
+        ${disks.map(d=>{
+          const c = d.percent>=90?'var(--red)':d.percent>=80?'var(--yellow)':'var(--green)';
+          return `<tr><td style="font-family:monospace;">${d.mountpoint}</td><td style="color:var(--text3);">${d.fstype||'?'}</td><td>${d.used_gb} GB</td><td>${d.total_gb} GB</td>
+            <td><div style="background:var(--surface2);height:8px;border-radius:3px;overflow:hidden;"><div style="background:${c};height:100%;width:${d.percent}%;"></div></div><span style="font-size:10px;color:${c};">${d.percent}%</span></td></tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+
+    <!-- Two columns: top processes + listening ports -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+      <div>
+        <div class="an-section-title">🔥 Top processes (by CPU)</div>
+        <table style="width:100%;font-size:11px;">
+          <thead><tr style="color:var(--text3);text-align:left;"><th>PID</th><th>Name</th><th>CPU%</th><th>Mem MB</th></tr></thead>
+          <tbody>
+            ${(snap.top_cpu_processes||[]).slice(0,8).map(p=>`
+              <tr><td>${p.pid}</td><td style="color:var(--text);">${p.name}</td><td>${p.cpu}%</td><td>${p.mem_mb}</td></tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div>
+        <div class="an-section-title">🔌 Listening sockets (${sock.length})</div>
+        <div style="font-family:monospace;font-size:10px;max-height:200px;overflow:auto;color:var(--text2);">
+          ${sock.slice(0,30).map(s=>`<div>${s.ip}:<strong>${s.port}</strong>${s.pid?` <span style="color:var(--text3)">(pid ${s.pid})</span>`:''}</div>`).join('') || '<div style="color:var(--text3);">(none visible without elevated rights)</div>'}
+        </div>
+      </div>
+    </div>
+
+    <!-- Problems detected -->
+    <div class="an-section-title" style="margin-top:6px;">🚨 Problems Detected</div>
+    ${probs.length === 0
+      ? '<div style="color:var(--green);padding:14px;background:rgba(16,185,129,.08);border-radius:6px;">✓ System looks healthy. No CPU/memory/disk/security thresholds breached.</div>'
+      : probs.map((p,i)=>{
+          const sc = {critical:'var(--red)',high:'var(--orange)',medium:'var(--yellow)',low:'var(--text3)'}[p.severity]||'var(--text3)';
+          const fixBtn = p.auto_fixable
+            ? `<button class="btn btn-primary btn-sm" onclick="executeDeepFix(${i})" style="font-size:11px;">🛠 Auto-Fix</button>`
+            : `<span style="font-size:11px;color:var(--text3);font-style:italic;">manual fix only</span>`;
+          return `<div style="background:var(--surface2);border-left:3px solid ${sc};border-radius:6px;padding:10px;margin-bottom:8px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <div>
+                <span style="color:${sc};font-weight:700;font-size:10px;text-transform:uppercase;">${p.severity}</span>
+                <strong style="margin-left:6px;">${p.title}</strong>
+              </div>
+              ${fixBtn}
+            </div>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;"><strong>Evidence:</strong> ${p.evidence}</div>
+            <details style="margin-top:6px;"><summary style="cursor:pointer;font-size:11px;color:var(--accent);">show ${(p.suggested_fix||[]).length} fix command(s)</summary>
+              <pre style="background:var(--bg);padding:8px;border-radius:4px;font-size:10px;margin-top:4px;white-space:pre-wrap;">${(p.suggested_fix||[]).join('\n')}</pre>
+            </details>
+            <div id="fix-result-${i}" style="margin-top:6px;"></div>
+          </div>`;
+        }).join('')}
+  `;
+  document.getElementById('deep-body').innerHTML = html;
+}
+
+function formatUptime(s) {
+  if(!s) return '—';
+  const d = Math.floor(s/86400);
+  const h = Math.floor((s%86400)/3600);
+  const m = Math.floor((s%3600)/60);
+  if(d) return `${d}d ${h}h`;
+  if(h) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+async function executeDeepFix(idx) {
+  if(!currentDeep) return;
+  const ok = confirm(`Execute auto-fix for problem #${idx}?\nLocal hosts will show what would run (sudo gated).\nRemote hosts with SSH creds will actually execute.`);
+  if(!ok) return;
+
+  const out = document.getElementById(`fix-result-${idx}`);
+  out.innerHTML = '<div style="color:var(--accent);font-size:11px;padding:6px;">⏳ executing…</div>';
+  try {
+    const r = await fetch(`${API}/api/v1/host/${currentDeep.hostId}/deep-fix`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({problem_index:idx}),
+    });
+    const d = await r.json();
+    const lines = (d.results||[]).map(s => {
+      const c = s.executed ? 'var(--green)' : 'var(--yellow)';
+      return `<div style="color:${c};font-family:monospace;font-size:10px;"><strong>${s.executed?'[OK]':'[DRY]'}</strong> ${s.command}${s.reason?` — ${s.reason}`:''}${s.stdout?`\n${s.stdout.substring(0,200)}`:''}</div>`;
+    }).join('');
+    out.innerHTML = `<div style="background:var(--bg);padding:8px;border-radius:4px;margin-top:4px;">
+      <div style="font-size:11px;color:${d.executed?'var(--green)':'var(--yellow)'};font-weight:600;margin-bottom:4px;">
+        ${d.executed ? '✓ Executed' : '⚠️ Not executed'} — ${d.note || d.reason || ''}
+      </div>${lines}
+    </div>`;
+  } catch(e) {
+    out.innerHTML = `<div style="color:var(--red);font-size:11px;">Failed: ${e}</div>`;
+  }
+}
+</script>
+
 </body>
 </html>

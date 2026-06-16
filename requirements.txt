@@ -46,7 +46,9 @@ pysnmp-mibs==0.1.6
 netmiko==4.4.0
 napalm==5.0.0
 nmap3==1.6.0
+python-nmap==0.7.1          # Network Discovery Tool: nmap host discovery
 scapy==2.6.1
+psutil==6.1.0               # Network Discovery Tool: netmask/interface detection
 
 # ── Server Operations ─────────────────────────────────────────────────────────
 pywinrm==0.4.3
@@ -85,6 +87,8 @@ pypdf==5.1.0
 python-docx==1.1.2
 markdown==3.7
 rank-bm25==0.2.2
+openpyxl==3.1.5             # Network Discovery Tool: Excel export
+itsdangerous==2.2.0         # Network Discovery Tool: signed-cookie sessions
 
 # ── Scheduling ────────────────────────────────────────────────────────────────
 apscheduler==3.10.4

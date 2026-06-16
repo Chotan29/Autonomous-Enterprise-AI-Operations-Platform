@@ -62,6 +62,17 @@ app.include_router(config_backup.router, prefix="/api/v1/noc/devices",    tags=[
 app.include_router(compliance.router,    prefix="/api/v1/noc/compliance", tags=["Compliance"])
 app.include_router(discovery.router,     prefix="/api/v1/noc/discovery",  tags=["Discovery"])
 
+# ── Network Discovery Tool (self-contained dashboard + REST API + session auth)
+# Mounted as a sub-application so it keeps its own SessionMiddleware and SQLite
+# store, independent of the platform's JWT/Postgres stack. Available at
+# /discovery/ (dashboard) and /discovery/api/{scan,devices,history}.
+try:
+    from backend.services.noc_service.discovery.app import create_app as _create_discovery_app
+    app.mount("/discovery", _create_discovery_app(), name="network-discovery")
+except Exception as _exc:  # pragma: no cover - optional component
+    import logging
+    logging.getLogger("noc.main").warning("Network Discovery tool not mounted: %s", _exc)
+
 
 @app.get("/health/live")
 async def liveness():
